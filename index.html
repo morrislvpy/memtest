@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>贪吃蛇大作战</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -210,6 +213,8 @@ let direction = DIRECTIONS.RIGHT;
 let nextDirection = DIRECTIONS.RIGHT;
 let missiles = [];
 let pills = [];
+let particles = []; // visual effects particles
+let segmentEffects = []; // { index, color, timer }
 let score = 0;
 let survivalTime = 0;
 let gameRunning = false;
@@ -220,6 +225,7 @@ let lastSurvivalScoreTime = 0;
 let pillSpawnTimer = 0;
 let animFrameId = null;
 let deathReason = '';
+let snakeFlashTimer = 0;
 
 // ============ INIT ============
 function init() {
@@ -307,6 +313,8 @@ function startGame() {
   nextDirection = DIRECTIONS.RIGHT;
   missiles = [];
   pills = [];
+  particles = [];
+  segmentEffects = [];
   score = 0;
   survivalTime = 0;
   gameRunning = true;
@@ -374,6 +382,15 @@ function gameLoop(timestamp) {
     if (pills.length < PILL_COUNT_RANGE[1]) spawnPills();
   }
 
+  // Update particles
+  updateParticles();
+
+  // Update segment effects
+  for (let i = segmentEffects.length - 1; i >= 0; i--) {
+    segmentEffects[i].timer--;
+    if (segmentEffects[i].timer <= 0) segmentEffects.splice(i, 1);
+  }
+
   // Update HUD
   updateHUD();
 
@@ -411,10 +428,21 @@ function moveSnake() {
     if (head.x === pills[i].x && head.y === pills[i].y) {
       atePill = true;
       score += PILL_SCORE;
+      const pillX = pills[i].x * GRID_SIZE + GRID_SIZE / 2;
+      const pillY = pills[i].y * GRID_SIZE + GRID_SIZE / 2;
       pills.splice(i, 1);
+      // Blue healing effect
+      spawnHealEffect(pillX, pillY);
       // Shrink snake
       const shrinkAmount = Math.min(PILL_SHRINK, snake.length - 1);
       if (shrinkAmount > 0) {
+        // Flash the removed tail segments blue
+        for (let k = 0; k < shrinkAmount; k++) {
+          const idx = snake.length - 1 - k;
+          if (idx >= 0) {
+            segmentEffects.push({ index: idx, color: 'blue', timer: 20 });
+          }
+        }
         snake.splice(snake.length - shrinkAmount, shrinkAmount);
       }
       break;
@@ -429,6 +457,8 @@ function moveSnake() {
 function autoGrow() {
   const tail = snake[snake.length - 1];
   snake.push({ x: tail.x, y: tail.y });
+  // Flash the new tail segment
+  segmentEffects.push({ index: snake.length - 1, color: 'grow', timer: 18 });
 }
 
 // ============ MISSILES ============
@@ -464,16 +494,34 @@ function spawnMissile() {
       break;
   }
 
-  missiles.push({ x, y, vx, vy, trail: [] });
+  missiles.push({ x, y, vx, vy, trail: [], airflowTimer: 0 });
 }
 
 function updateMissiles() {
   for (let i = missiles.length - 1; i >= 0; i--) {
     const m = missiles[i];
     m.trail.push({ x: m.x, y: m.y });
-    if (m.trail.length > 8) m.trail.shift();
+    if (m.trail.length > 14) m.trail.shift();
     m.x += m.vx;
     m.y += m.vy;
+
+    // Spawn airflow particles
+    m.airflowTimer++;
+    if (m.airflowTimer % 2 === 0) {
+      const angle = Math.atan2(-m.vy, -m.vx);
+      const spread = (Math.random() - 0.5) * 1.2;
+      const speed = 0.3 + Math.random() * 0.5;
+      particles.push({
+        x: m.x + (Math.random() - 0.5) * 4,
+        y: m.y + (Math.random() - 0.5) * 4,
+        vx: Math.cos(angle + spread) * speed,
+        vy: Math.sin(angle + spread) * speed,
+        life: 15 + Math.random() * 10,
+        maxLife: 25,
+        size: 1.5 + Math.random() * 2,
+        type: 'airflow'
+      });
+    }
 
     // Remove if off screen
     if (m.x < -50 || m.x > canvas.width + 50 || m.y < -50 || m.y > canvas.height + 50) {
@@ -491,23 +539,24 @@ function checkMissileCollision() {
 
     for (let j = 0; j < snake.length; j++) {
       if (snake[j].x === mGridX && snake[j].y === mGridY) {
-        // Hit! Add length
+        // Hit! Red explosion
+        spawnExplosion(m.x, m.y);
+        // Add length
         const tail = snake[snake.length - 1];
         for (let k = 0; k < MISSILE_HIT_GROW; k++) {
           snake.push({ x: tail.x, y: tail.y });
+          segmentEffects.push({ index: snake.length - 1, color: 'hit', timer: 20 });
         }
+        // Flash the hit segment
+        segmentEffects.push({ index: j, color: 'hit', timer: 20 });
         // Remove missile and respawn
         missiles.splice(i, 1);
         spawnMissile();
-        // Flash effect
-        snakeFlashTimer = 10;
         break;
       }
     }
   }
 }
-
-let snakeFlashTimer = 0;
 
 // ============ PILLS ============
 function spawnPills() {
@@ -544,6 +593,82 @@ function updatePills(timestamp) {
     } else if (age > PILL_LIFETIME - 1500) {
       // Blink in last 1.5s
       p.alpha = Math.sin(age * 0.015) * 0.5 + 0.5;
+    }
+  }
+}
+
+// ============ PARTICLE EFFECTS ============
+function spawnExplosion(x, y) {
+  const count = 25;
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 / count) * i + Math.random() * 0.3;
+    const speed = 1 + Math.random() * 3;
+    const hue = Math.random() > 0.5 ? 0 : 30; // red and orange
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 20 + Math.random() * 15,
+      maxLife: 35,
+      size: 2 + Math.random() * 3,
+      type: 'explosion',
+      hue
+    });
+  }
+  // Central flash
+  particles.push({
+    x, y, vx: 0, vy: 0,
+    life: 8, maxLife: 8,
+    size: 20, type: 'flash',
+    color: 'rgba(255, 200, 50, 0.8)'
+  });
+}
+
+function spawnHealEffect(x, y) {
+  const count = 20;
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 / count) * i + Math.random() * 0.3;
+    const speed = 0.8 + Math.random() * 2;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 0.5, // slight upward bias
+      life: 25 + Math.random() * 15,
+      maxLife: 40,
+      size: 2 + Math.random() * 3,
+      type: 'heal',
+      hue: 200 + Math.random() * 40 // blue range
+    });
+  }
+  // Central blue flash
+  particles.push({
+    x, y, vx: 0, vy: 0,
+    life: 10, maxLife: 10,
+    size: 18, type: 'flash',
+    color: 'rgba(50, 150, 255, 0.8)'
+  });
+  // Rising "+10" text effect
+  particles.push({
+    x, y: y - 5, vx: 0, vy: -0.8,
+    life: 35, maxLife: 35,
+    size: 0, type: 'text',
+    text: '+10'
+  });
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+    // Slow down
+    if (p.type === 'explosion' || p.type === 'heal') {
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+    }
+    if (p.life <= 0) {
+      particles.splice(i, 1);
     }
   }
 }
@@ -608,43 +733,86 @@ function draw(timestamp) {
     ctx.restore();
   }
 
+  // Draw missile trails and airflow particles
+  for (const p of particles) {
+    if (p.type === 'airflow') {
+      const alpha = (p.life / p.maxLife) * 0.35;
+      ctx.fillStyle = `rgba(255, 120, 50, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (p.life / p.maxLife), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   // Draw missiles
   for (const m of missiles) {
-    // Trail
+    // Trail with gradient
     for (let t = 0; t < m.trail.length; t++) {
-      const alpha = (t / m.trail.length) * 0.5;
-      ctx.fillStyle = `rgba(255, 60, 60, ${alpha})`;
-      const tr = 3 * (t / m.trail.length);
+      const progress = t / m.trail.length;
+      const alpha = progress * 0.6;
+      // Color goes from dark orange to bright red
+      const r = 255;
+      const g = Math.floor(60 + progress * 80);
+      const b = Math.floor(20 + progress * 20);
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      const tr = 2 + progress * 4;
       ctx.beginPath();
       ctx.arc(m.trail[t].x, m.trail[t].y, tr, 0, Math.PI * 2);
       ctx.fill();
     }
 
+    // Missile glow
+    const missileGlow = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, 14);
+    missileGlow.addColorStop(0, 'rgba(255, 80, 30, 0.3)');
+    missileGlow.addColorStop(1, 'rgba(255, 80, 30, 0)');
+    ctx.fillStyle = missileGlow;
+    ctx.fillRect(m.x - 14, m.y - 14, 28, 28);
+
     // Missile body
     ctx.fillStyle = '#ff3333';
-    ctx.shadowColor = '#ff3333';
-    ctx.shadowBlur = 8;
+    ctx.shadowColor = '#ff4400';
+    ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.arc(m.x, m.y, 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
+
+    // Missile core highlight
+    ctx.fillStyle = '#ffcc44';
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 2, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   // Draw snake
   for (let i = snake.length - 1; i >= 0; i--) {
     const s = snake[i];
     const progress = i / snake.length;
-    const hue = 140 + progress * 80; // green to cyan
+    const hue = 140 + progress * 80;
     const lightness = 55 + (i === 0 ? 15 : 0);
 
-    if (snakeFlashTimer > 0 && i > 0) {
-      ctx.fillStyle = `hsl(${hue}, 100%, ${lightness + 20}%)`;
+    // Check for segment effects
+    const effect = segmentEffects.find(e => e.index === i);
+    let fillColor;
+    if (effect) {
+      const flashPhase = Math.sin(effect.timer * 0.8) * 0.5 + 0.5;
+      if (effect.color === 'hit') {
+        // Red flash for missile hit
+        fillColor = `hsl(${flashPhase * 30}, 100%, ${55 + flashPhase * 25}%)`;
+      } else if (effect.color === 'blue') {
+        // Blue flash for pill shrink
+        fillColor = `hsl(${200 + flashPhase * 30}, 100%, ${55 + flashPhase * 25}%)`;
+      } else if (effect.color === 'grow') {
+        // Yellow-green flash for auto grow
+        fillColor = `hsl(${80 + flashPhase * 40}, 100%, ${55 + flashPhase * 25}%)`;
+      }
     } else {
-      ctx.fillStyle = `hsl(${hue}, 100%, ${lightness}%)`;
+      fillColor = `hsl(${hue}, 100%, ${lightness}%)`;
     }
 
+    ctx.fillStyle = fillColor;
+
     if (i === 0) {
-      // Head glow
       ctx.shadowColor = '#00ff88';
       ctx.shadowBlur = 12;
     }
@@ -684,7 +852,53 @@ function draw(timestamp) {
     }
   }
 
-  if (snakeFlashTimer > 0) snakeFlashTimer--;
+  // Draw particles (on top of snake)
+  for (const p of particles) {
+    const alpha = Math.max(0, p.life / p.maxLife);
+
+    if (p.type === 'explosion') {
+      // Red/orange explosion particles
+      ctx.fillStyle = `hsla(${p.hue}, 100%, 55%, ${alpha})`;
+      ctx.shadowColor = `hsla(${p.hue}, 100%, 55%, ${alpha * 0.5})`;
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else if (p.type === 'heal') {
+      // Blue healing particles
+      ctx.fillStyle = `hsla(${p.hue}, 100%, 65%, ${alpha})`;
+      ctx.shadowColor = `hsla(${p.hue}, 100%, 65%, ${alpha * 0.5})`;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else if (p.type === 'flash') {
+      // Central flash (explosion or heal)
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * alpha);
+      grad.addColorStop(0, p.color);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
+      ctx.restore();
+    } else if (p.type === 'text') {
+      // Floating text
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#00ccff';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#00ccff';
+      ctx.shadowBlur = 6;
+      ctx.fillText(p.text, p.x, p.y);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+    // airflow particles are drawn before missiles, skip here
+  }
 }
 
 // ============ HUD ============
