@@ -253,43 +253,61 @@ function playExplosionSound() {
   const ctx = audioCtx;
   const now = ctx.currentTime;
 
-  // Noise burst for explosion
-  const bufferSize = ctx.sampleRate * 0.3;
+  // Noise burst for explosion - louder and more aggressive
+  const bufferSize = ctx.sampleRate * 0.4;
   const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
   const data = buffer.getChannelData(0);
   for (let i = 0; i < bufferSize; i++) {
-    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 2);
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 1.5);
   }
   const noise = ctx.createBufferSource();
   noise.buffer = buffer;
 
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(1000, now);
-  filter.frequency.exponentialRampToValueAtTime(100, now + 0.25);
+  filter.frequency.setValueAtTime(2000, now);
+  filter.frequency.exponentialRampToValueAtTime(150, now + 0.3);
 
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.35, now);
-  gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+  gain.gain.setValueAtTime(0.6, now);
+  gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
 
   noise.connect(filter);
   filter.connect(gain);
   gain.connect(ctx.destination);
   noise.start(now);
-  noise.stop(now + 0.3);
+  noise.stop(now + 0.4);
 
-  // Low boom
+  // Heavy low boom
   const osc = ctx.createOscillator();
   osc.type = 'sine';
-  osc.frequency.setValueAtTime(150, now);
-  osc.frequency.exponentialRampToValueAtTime(30, now + 0.2);
+  osc.frequency.setValueAtTime(200, now);
+  osc.frequency.exponentialRampToValueAtTime(25, now + 0.3);
   const oscGain = ctx.createGain();
-  oscGain.gain.setValueAtTime(0.4, now);
-  oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+  oscGain.gain.setValueAtTime(0.6, now);
+  oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
   osc.connect(oscGain);
   oscGain.connect(ctx.destination);
   osc.start(now);
-  osc.stop(now + 0.25);
+  osc.stop(now + 0.35);
+
+  // Distortion crack
+  const crack = ctx.createOscillator();
+  crack.type = 'sawtooth';
+  crack.frequency.setValueAtTime(300, now);
+  crack.frequency.exponentialRampToValueAtTime(50, now + 0.15);
+  const crackGain = ctx.createGain();
+  crackGain.gain.setValueAtTime(0.25, now);
+  crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+  const crackFilter = ctx.createBiquadFilter();
+  crackFilter.type = 'bandpass';
+  crackFilter.frequency.value = 800;
+  crackFilter.Q.value = 2;
+  crack.connect(crackFilter);
+  crackFilter.connect(crackGain);
+  crackGain.connect(ctx.destination);
+  crack.start(now);
+  crack.stop(now + 0.15);
 }
 
 function playHealSound() {
@@ -304,8 +322,8 @@ function playHealSound() {
   osc1.frequency.setValueAtTime(659, now + 0.1);  // E5
   osc1.frequency.setValueAtTime(784, now + 0.2);  // G5
   const gain1 = ctx.createGain();
-  gain1.gain.setValueAtTime(0.25, now);
-  gain1.gain.setValueAtTime(0.25, now + 0.15);
+  gain1.gain.setValueAtTime(0.3, now);
+  gain1.gain.setValueAtTime(0.3, now + 0.15);
   gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
   osc1.connect(gain1);
   gain1.connect(ctx.destination);
@@ -318,12 +336,114 @@ function playHealSound() {
   osc2.frequency.setValueAtTime(1047, now + 0.1); // C6
   const gain2 = ctx.createGain();
   gain2.gain.setValueAtTime(0, now);
-  gain2.gain.setValueAtTime(0.15, now + 0.1);
+  gain2.gain.setValueAtTime(0.2, now + 0.1);
   gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
   osc2.connect(gain2);
   gain2.connect(ctx.destination);
   osc2.start(now + 0.1);
   osc2.stop(now + 0.35);
+}
+
+// ============ BACKGROUND MUSIC ============
+let bgMusicNodes = null;
+
+function startBgMusic() {
+  ensureAudio();
+  const ctx = audioCtx;
+
+  // Create a quiet, tense ambient loop using oscillators
+  const masterGain = ctx.createGain();
+  masterGain.gain.value = 0.06; // very quiet
+  masterGain.connect(ctx.destination);
+
+  // Deep drone
+  const drone = ctx.createOscillator();
+  drone.type = 'sine';
+  drone.frequency.value = 55; // A1
+
+  const droneGain = ctx.createGain();
+  droneGain.gain.value = 0.5;
+
+  const droneFilter = ctx.createBiquadFilter();
+  droneFilter.type = 'lowpass';
+  droneFilter.frequency.value = 200;
+
+  drone.connect(droneFilter);
+  droneFilter.connect(droneGain);
+  droneGain.connect(masterGain);
+
+  // Slow LFO on drone for pulse
+  const lfo = ctx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = 0.15; // very slow
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.3;
+  lfo.connect(lfoGain);
+  lfoGain.connect(droneGain.gain);
+
+  // Second drone - slight detune for tension
+  const drone2 = ctx.createOscillator();
+  drone2.type = 'sine';
+  drone2.frequency.value = 57; // slightly off for dissonance
+
+  const drone2Gain = ctx.createGain();
+  drone2Gain.gain.value = 0.3;
+
+  const drone2Filter = ctx.createBiquadFilter();
+  drone2Filter.type = 'lowpass';
+  drone2Filter.frequency.value = 180;
+
+  drone2.connect(drone2Filter);
+  drone2Filter.connect(drone2Gain);
+  drone2Gain.connect(masterGain);
+
+  // High tension tone
+  const tension = ctx.createOscillator();
+  tension.type = 'triangle';
+  tension.frequency.value = 220; // A3
+
+  const tensionGain = ctx.createGain();
+  tensionGain.gain.value = 0.15;
+
+  const tensionFilter = ctx.createBiquadFilter();
+  tensionFilter.type = 'bandpass';
+  tensionFilter.frequency.value = 300;
+  tensionFilter.Q.value = 5;
+
+  tension.connect(tensionFilter);
+  tensionFilter.connect(tensionGain);
+  tensionGain.connect(masterGain);
+
+  // Slow LFO on tension filter for movement
+  const lfo2 = ctx.createOscillator();
+  lfo2.type = 'sine';
+  lfo2.frequency.value = 0.08;
+  const lfo2Gain = ctx.createGain();
+  lfo2Gain.gain.value = 150;
+  lfo2.connect(lfo2Gain);
+  lfo2Gain.connect(tensionFilter.frequency);
+
+  // Start all
+  drone.start();
+  drone2.start();
+  tension.start();
+  lfo.start();
+  lfo2.start();
+
+  bgMusicNodes = { drone, drone2, tension, lfo, lfo2, masterGain };
+}
+
+function stopBgMusic() {
+  if (bgMusicNodes) {
+    try {
+      bgMusicNodes.drone.stop();
+      bgMusicNodes.drone2.stop();
+      bgMusicNodes.tension.stop();
+      bgMusicNodes.lfo.stop();
+      bgMusicNodes.lfo2.stop();
+    } catch(e) {}
+    bgMusicNodes = null;
+  }
 }
 
 // ============ SCORE POPUP ============
@@ -431,6 +551,7 @@ function startGame() {
   spawnPills();
 
   if (animFrameId) cancelAnimationFrame(animFrameId);
+  startBgMusic();
   gameLoop(performance.now());
 }
 
@@ -899,9 +1020,6 @@ function draw(timestamp) {
   // Draw snake
   for (let i = snake.length - 1; i >= 0; i--) {
     const s = snake[i];
-    const progress = i / snake.length;
-    const hue = 140 + progress * 80;
-    const lightness = 55 + (i === 0 ? 15 : 0);
 
     // Check for segment effects
     const effect = segmentEffects.find(e => e.index === i);
@@ -932,7 +1050,8 @@ function draw(timestamp) {
         glowSize = 8 + flashPhase * 5;
       }
     } else {
-      fillColor = `hsl(${hue}, 100%, ${lightness}%)`;
+      // Solid neon green for all segments - head slightly brighter
+      fillColor = i === 0 ? '#00ff88' : '#00dd66';
     }
 
     ctx.fillStyle = fillColor;
@@ -1047,6 +1166,7 @@ function updateHUD() {
 function gameOver() {
   gameRunning = false;
   if (animFrameId) cancelAnimationFrame(animFrameId);
+  stopBgMusic();
 
   document.getElementById('hud').classList.add('hidden');
   document.getElementById('pauseBtn').classList.add('hidden');
