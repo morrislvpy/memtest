@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>贪吃蛇大作战</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a1a;
+    color: #e0e0ff;
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    height: 100vh;
+    width: 100vw;
+  }
+  #gameCanvas {
+    display: block;
+    position: absolute;
+    top: 0; left: 0;
+  }
+  .overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(10, 10, 26, 0.92);
+    z-index: 10;
+    transition: opacity 0.3s;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h1 {
+    font-size: 2.2em;
+    background: linear-gradient(90deg, #00ff88, #00ccff, #ff66cc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.3em;
+  }
+  .overlay h2 {
+    font-size: 1.5em;
+    color: #ff4466;
+    margin-bottom: 0.5em;
+  }
+  .overlay p {
+    color: #8888aa;
+    margin-bottom: 0.4em;
+    font-size: 0.95em;
+    text-align: center;
+    max-width: 320px;
+    line-height: 1.5;
+  }
+  .overlay .score-display {
+    font-size: 2em;
+    color: #00ff88;
+    margin: 0.3em 0;
+  }
+  .btn {
+    margin-top: 1em;
+    padding: 14px 48px;
+    font-size: 1.15em;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    background: linear-gradient(135deg, #00ff88, #00ccff);
+    color: #0a0a1a;
+    font-weight: bold;
+    letter-spacing: 1px;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .btn:active { transform: scale(0.95); }
+  .btn:hover { box-shadow: 0 0 20px rgba(0,255,136,0.4); }
+  .leaderboard {
+    margin-top: 1em;
+    width: 280px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .leaderboard h3 {
+    font-size: 1em;
+    color: #ffcc00;
+    margin-bottom: 0.4em;
+    text-align: center;
+  }
+  .leaderboard table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85em;
+  }
+  .leaderboard th {
+    color: #8888aa;
+    padding: 3px 6px;
+    border-bottom: 1px solid #333;
+    text-align: left;
+  }
+  .leaderboard td {
+    padding: 3px 6px;
+    border-bottom: 1px solid #1a1a2e;
+  }
+  .leaderboard .rank-1 { color: #ffd700; }
+  .leaderboard .rank-2 { color: #c0c0c0; }
+  .leaderboard .rank-3 { color: #cd7f32; }
+  .weekly-champions {
+    margin-top: 0.8em;
+    width: 280px;
+  }
+  .weekly-champions h3 {
+    font-size: 0.9em;
+    color: #ff66cc;
+    margin-bottom: 0.3em;
+    text-align: center;
+  }
+  .weekly-champions p {
+    font-size: 0.8em;
+    color: #7777aa;
+    margin: 0.15em 0;
+    text-align: center;
+  }
+  #hud {
+    position: fixed;
+    top: 8px; left: 8px; right: 8px;
+    display: flex;
+    justify-content: space-between;
+    z-index: 5;
+    pointer-events: none;
+    font-size: 0.9em;
+  }
+  #hud span {
+    background: rgba(10,10,26,0.7);
+    padding: 4px 10px;
+    border-radius: 12px;
+  }
+  .hud-score { color: #00ff88; }
+  .hud-length { color: #00ccff; }
+  .hud-time { color: #ffcc00; }
+  #pauseBtn {
+    position: fixed;
+    top: 8px; right: 8px;
+    z-index: 6;
+    background: rgba(10,10,26,0.7);
+    color: #aaa;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 0.85em;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="hud" class="hidden">
+  <span class="hud-score" id="hudScore">得分: 0</span>
+  <span class="hud-length" id="hudLength">长度: 3</span>
+  <span class="hud-time" id="hudTime">0s</span>
+</div>
+<button id="pauseBtn" class="hidden" onclick="togglePause()">暂停</button>
+
+<!-- Start Screen -->
+<div id="startScreen" class="overlay">
+  <h1>贪吃蛇大作战</h1>
+  <p>蛇身每5秒自动增长1单位</p>
+  <p>躲避导弹！被击中蛇身+1</p>
+  <p>吃掉药片缩短2单位，+10分</p>
+  <p>滑动屏幕控制方向</p>
+  <button class="btn" onclick="startGame()">开始游戏</button>
+  <div class="leaderboard" id="startLeaderboard"></div>
+  <div class="weekly-champions" id="startWeeklyChampions"></div>
+</div>
+
+<!-- Game Over Screen -->
+<div id="gameOverScreen" class="overlay hidden">
+  <h2>游戏结束</h2>
+  <div class="score-display" id="finalScore">0</div>
+  <p id="deathReason"></p>
+  <button class="btn" onclick="startGame()">再来一局</button>
+  <div class="leaderboard" id="endLeaderboard"></div>
+  <div class="weekly-champions" id="endWeeklyChampions"></div>
+</div>
+
+<script>
+// ============ CONSTANTS ============
+const GRID_SIZE = 18;
+const AUTO_GROW_INTERVAL = 5000; // ms
+const MISSILE_COUNT_RANGE = [2, 4];
+const PILL_COUNT_RANGE = [1, 3];
+const PILL_LIFETIME = 5000; // ms
+const PILL_SHRINK = 2;
+const MISSILE_HIT_GROW = 1;
+const PILL_SCORE = 10;
+const SURVIVAL_SCORE_INTERVAL = 1000; // ms
+const MISSILE_SPEED = 1.54;
+const SNAKE_SPEED = 169; // ms per move
+const DIRECTIONS = {
+  UP: { x: 0, y: -1 },
+  DOWN: { x: 0, y: 1 },
+  LEFT: { x: -1, y: 0 },
+  RIGHT: { x: 1, y: 0 }
+};
+
+// ============ STATE ============
+let canvas, ctx;
+let cols, rows;
+let snake = [];
+let direction = DIRECTIONS.RIGHT;
+let nextDirection = DIRECTIONS.RIGHT;
+let missiles = [];
+let pills = [];
+let score = 0;
+let survivalTime = 0;
+let gameRunning = false;
+let gamePaused = false;
+let lastMoveTime = 0;
+let lastAutoGrowTime = 0;
+let lastSurvivalScoreTime = 0;
+let pillSpawnTimer = 0;
+let animFrameId = null;
+let deathReason = '';
+
+// ============ INIT ============
+function init() {
+  canvas = document.getElementById('gameCanvas');
+  ctx = canvas.getContext('2d');
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+  setupTouchControls();
+  setupKeyboardControls();
+  renderLeaderboards();
+}
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  cols = Math.floor(canvas.width / GRID_SIZE);
+  rows = Math.floor(canvas.height / GRID_SIZE);
+}
+
+// ============ TOUCH CONTROLS ============
+let touchStartX = 0, touchStartY = 0;
+function setupTouchControls() {
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    touchStartX = t.clientX;
+    touchStartY = t.clientY;
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (!gameRunning || gamePaused) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStartX;
+    const dy = t.clientY - touchStartY;
+    const minSwipe = 20;
+    if (Math.abs(dx) < minSwipe && Math.abs(dy) < minSwipe) return;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      if (dx > 0 && direction !== DIRECTIONS.LEFT) nextDirection = DIRECTIONS.RIGHT;
+      else if (dx < 0 && direction !== DIRECTIONS.RIGHT) nextDirection = DIRECTIONS.LEFT;
+    } else {
+      if (dy > 0 && direction !== DIRECTIONS.UP) nextDirection = DIRECTIONS.DOWN;
+      else if (dy < 0 && direction !== DIRECTIONS.DOWN) nextDirection = DIRECTIONS.UP;
+    }
+  }, { passive: false });
+}
+
+// ============ KEYBOARD CONTROLS ============
+function setupKeyboardControls() {
+  document.addEventListener('keydown', (e) => {
+    if (!gameRunning || gamePaused) return;
+    switch(e.key) {
+      case 'ArrowUp': case 'w': case 'W':
+        if (direction !== DIRECTIONS.DOWN) nextDirection = DIRECTIONS.UP; break;
+      case 'ArrowDown': case 's': case 'S':
+        if (direction !== DIRECTIONS.UP) nextDirection = DIRECTIONS.DOWN; break;
+      case 'ArrowLeft': case 'a': case 'A':
+        if (direction !== DIRECTIONS.RIGHT) nextDirection = DIRECTIONS.LEFT; break;
+      case 'ArrowRight': case 'd': case 'D':
+        if (direction !== DIRECTIONS.LEFT) nextDirection = DIRECTIONS.RIGHT; break;
+    }
+  });
+}
+
+// ============ GAME START ============
+function startGame() {
+  document.getElementById('startScreen').classList.add('hidden');
+  document.getElementById('gameOverScreen').classList.add('hidden');
+  document.getElementById('hud').classList.remove('hidden');
+  document.getElementById('pauseBtn').classList.remove('hidden');
+
+  resizeCanvas();
+  const startX = Math.floor(cols / 2);
+  const startY = Math.floor(rows / 2);
+  snake = [
+    { x: startX, y: startY },
+    { x: startX - 1, y: startY },
+    { x: startX - 2, y: startY }
+  ];
+  direction = DIRECTIONS.RIGHT;
+  nextDirection = DIRECTIONS.RIGHT;
+  missiles = [];
+  pills = [];
+  score = 0;
+  survivalTime = 0;
+  gameRunning = true;
+  gamePaused = false;
+  deathReason = '';
+  lastMoveTime = performance.now();
+  lastAutoGrowTime = performance.now();
+  lastSurvivalScoreTime = performance.now();
+  pillSpawnTimer = 0;
+
+  // Spawn initial missiles
+  const mCount = randInt(MISSILE_COUNT_RANGE[0], MISSILE_COUNT_RANGE[1]);
+  for (let i = 0; i < mCount; i++) spawnMissile();
+
+  // Spawn initial pills
+  spawnPills();
+
+  if (animFrameId) cancelAnimationFrame(animFrameId);
+  gameLoop(performance.now());
+}
+
+// ============ GAME LOOP ============
+function gameLoop(timestamp) {
+  if (!gameRunning) return;
+  if (gamePaused) {
+    animFrameId = requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  const dt = timestamp - lastMoveTime;
+
+  // Move snake
+  if (dt >= SNAKE_SPEED) {
+    lastMoveTime = timestamp;
+    direction = nextDirection;
+    moveSnake();
+  }
+
+  // Auto grow
+  if (timestamp - lastAutoGrowTime >= AUTO_GROW_INTERVAL) {
+    lastAutoGrowTime = timestamp;
+    autoGrow();
+  }
+
+  // Survival score
+  if (timestamp - lastSurvivalScoreTime >= SURVIVAL_SCORE_INTERVAL) {
+    lastSurvivalScoreTime = timestamp;
+    score += 1;
+    survivalTime += 1;
+  }
+
+  // Update missiles
+  updateMissiles();
+
+  // Check missile collision
+  checkMissileCollision();
+
+  // Update pills
+  updatePills(timestamp);
+
+  // Pill spawn timer
+  pillSpawnTimer += 16;
+  if (pillSpawnTimer >= 4000) {
+    pillSpawnTimer = 0;
+    if (pills.length < PILL_COUNT_RANGE[1]) spawnPills();
+  }
+
+  // Update HUD
+  updateHUD();
+
+  // Draw
+  draw(timestamp);
+
+  animFrameId = requestAnimationFrame(gameLoop);
+}
+
+// ============ SNAKE MOVEMENT ============
+function moveSnake() {
+  const head = { x: snake[0].x + direction.x, y: snake[0].y + direction.y };
+
+  // Wall collision
+  if (head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows) {
+    deathReason = '撞墙了！';
+    gameOver();
+    return;
+  }
+
+  // Self collision
+  for (let i = 0; i < snake.length; i++) {
+    if (head.x === snake[i].x && head.y === snake[i].y) {
+      deathReason = '咬到自己了！';
+      gameOver();
+      return;
+    }
+  }
+
+  snake.unshift(head);
+
+  // Check pill collision
+  let atePill = false;
+  for (let i = pills.length - 1; i >= 0; i--) {
+    if (head.x === pills[i].x && head.y === pills[i].y) {
+      atePill = true;
+      score += PILL_SCORE;
+      pills.splice(i, 1);
+      // Shrink snake
+      const shrinkAmount = Math.min(PILL_SHRINK, snake.length - 1);
+      if (shrinkAmount > 0) {
+        snake.splice(snake.length - shrinkAmount, shrinkAmount);
+      }
+      break;
+    }
+  }
+
+  if (!atePill) {
+    snake.pop();
+  }
+}
+
+function autoGrow() {
+  const tail = snake[snake.length - 1];
+  snake.push({ x: tail.x, y: tail.y });
+}
+
+// ============ MISSILES ============
+function spawnMissile() {
+  const edge = randInt(0, 3); // 0=top, 1=right, 2=bottom, 3=left
+  let x, y, vx, vy;
+  const speed = MISSILE_SPEED * (0.7 + Math.random() * 0.6);
+
+  switch(edge) {
+    case 0: // top
+      x = Math.random() * canvas.width;
+      y = -10;
+      vx = (Math.random() - 0.5) * speed;
+      vy = Math.random() * speed * 0.5 + speed * 0.5;
+      break;
+    case 1: // right
+      x = canvas.width + 10;
+      y = Math.random() * canvas.height;
+      vx = -(Math.random() * speed * 0.5 + speed * 0.5);
+      vy = (Math.random() - 0.5) * speed;
+      break;
+    case 2: // bottom
+      x = Math.random() * canvas.width;
+      y = canvas.height + 10;
+      vx = (Math.random() - 0.5) * speed;
+      vy = -(Math.random() * speed * 0.5 + speed * 0.5);
+      break;
+    case 3: // left
+      x = -10;
+      y = Math.random() * canvas.height;
+      vx = Math.random() * speed * 0.5 + speed * 0.5;
+      vy = (Math.random() - 0.5) * speed;
+      break;
+  }
+
+  missiles.push({ x, y, vx, vy, trail: [] });
+}
+
+function updateMissiles() {
+  for (let i = missiles.length - 1; i >= 0; i--) {
+    const m = missiles[i];
+    m.trail.push({ x: m.x, y: m.y });
+    if (m.trail.length > 8) m.trail.shift();
+    m.x += m.vx;
+    m.y += m.vy;
+
+    // Remove if off screen
+    if (m.x < -50 || m.x > canvas.width + 50 || m.y < -50 || m.y > canvas.height + 50) {
+      missiles.splice(i, 1);
+      spawnMissile(); // Respawn
+    }
+  }
+}
+
+function checkMissileCollision() {
+  for (let i = missiles.length - 1; i >= 0; i--) {
+    const m = missiles[i];
+    const mGridX = Math.floor(m.x / GRID_SIZE);
+    const mGridY = Math.floor(m.y / GRID_SIZE);
+
+    for (let j = 0; j < snake.length; j++) {
+      if (snake[j].x === mGridX && snake[j].y === mGridY) {
+        // Hit! Add length
+        const tail = snake[snake.length - 1];
+        for (let k = 0; k < MISSILE_HIT_GROW; k++) {
+          snake.push({ x: tail.x, y: tail.y });
+        }
+        // Remove missile and respawn
+        missiles.splice(i, 1);
+        spawnMissile();
+        // Flash effect
+        snakeFlashTimer = 10;
+        break;
+      }
+    }
+  }
+}
+
+let snakeFlashTimer = 0;
+
+// ============ PILLS ============
+function spawnPills() {
+  const count = randInt(PILL_COUNT_RANGE[0], PILL_COUNT_RANGE[1]);
+  const currentPillCount = pills.length;
+  const toSpawn = Math.min(count, PILL_COUNT_RANGE[1] - currentPillCount);
+
+  for (let i = 0; i < toSpawn; i++) {
+    let px, py, attempts = 0;
+    do {
+      px = randInt(1, cols - 2);
+      py = randInt(1, rows - 2);
+      attempts++;
+    } while (isOccupied(px, py) && attempts < 50);
+
+    if (attempts < 50) {
+      pills.push({ x: px, y: py, spawnTime: performance.now(), alpha: 1 });
+    }
+  }
+}
+
+function isOccupied(x, y) {
+  for (const s of snake) if (s.x === x && s.y === y) return true;
+  for (const p of pills) if (p.x === x && p.y === y) return true;
+  return false;
+}
+
+function updatePills(timestamp) {
+  for (let i = pills.length - 1; i >= 0; i--) {
+    const p = pills[i];
+    const age = timestamp - p.spawnTime;
+    if (age >= PILL_LIFETIME) {
+      pills.splice(i, 1);
+    } else if (age > PILL_LIFETIME - 1500) {
+      // Blink in last 1.5s
+      p.alpha = Math.sin(age * 0.015) * 0.5 + 0.5;
+    }
+  }
+}
+
+// ============ DRAWING ============
+function draw(timestamp) {
+  ctx.fillStyle = '#0a0a1a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Grid (subtle)
+  ctx.strokeStyle = 'rgba(30, 30, 60, 0.4)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= cols; x++) {
+    ctx.beginPath();
+    ctx.moveTo(x * GRID_SIZE, 0);
+    ctx.lineTo(x * GRID_SIZE, rows * GRID_SIZE);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= rows; y++) {
+    ctx.beginPath();
+    ctx.moveTo(0, y * GRID_SIZE);
+    ctx.lineTo(cols * GRID_SIZE, y * GRID_SIZE);
+    ctx.stroke();
+  }
+
+  // Draw pills
+  for (const p of pills) {
+    const cx = p.x * GRID_SIZE + GRID_SIZE / 2;
+    const cy = p.y * GRID_SIZE + GRID_SIZE / 2;
+    const pulse = Math.sin(timestamp * 0.006) * 2;
+    const r = GRID_SIZE / 2 - 2 + pulse;
+
+    ctx.save();
+    ctx.globalAlpha = p.alpha;
+
+    // Glow
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2);
+    glow.addColorStop(0, 'rgba(0, 255, 200, 0.3)');
+    glow.addColorStop(1, 'rgba(0, 255, 200, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(cx - r * 2, cy - r * 2, r * 4, r * 4);
+
+    // Pill body
+    ctx.fillStyle = '#00ffc8';
+    ctx.shadowColor = '#00ffc8';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.roundRect(p.x * GRID_SIZE + 2, p.y * GRID_SIZE + 2, GRID_SIZE - 4, GRID_SIZE - 4, 4);
+    ctx.fill();
+
+    // Cross symbol
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#0a0a1a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 3, cy);
+    ctx.lineTo(cx + 3, cy);
+    ctx.moveTo(cx, cy - 3);
+    ctx.lineTo(cx, cy + 3);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // Draw missiles
+  for (const m of missiles) {
+    // Trail
+    for (let t = 0; t < m.trail.length; t++) {
+      const alpha = (t / m.trail.length) * 0.5;
+      ctx.fillStyle = `rgba(255, 60, 60, ${alpha})`;
+      const tr = 3 * (t / m.trail.length);
+      ctx.beginPath();
+      ctx.arc(m.trail[t].x, m.trail[t].y, tr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Missile body
+    ctx.fillStyle = '#ff3333';
+    ctx.shadowColor = '#ff3333';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // Draw snake
+  for (let i = snake.length - 1; i >= 0; i--) {
+    const s = snake[i];
+    const progress = i / snake.length;
+    const hue = 140 + progress * 80; // green to cyan
+    const lightness = 55 + (i === 0 ? 15 : 0);
+
+    if (snakeFlashTimer > 0 && i > 0) {
+      ctx.fillStyle = `hsl(${hue}, 100%, ${lightness + 20}%)`;
+    } else {
+      ctx.fillStyle = `hsl(${hue}, 100%, ${lightness}%)`;
+    }
+
+    if (i === 0) {
+      // Head glow
+      ctx.shadowColor = '#00ff88';
+      ctx.shadowBlur = 12;
+    }
+
+    const padding = i === 0 ? 1 : 2;
+    ctx.beginPath();
+    ctx.roundRect(
+      s.x * GRID_SIZE + padding,
+      s.y * GRID_SIZE + padding,
+      GRID_SIZE - padding * 2,
+      GRID_SIZE - padding * 2,
+      i === 0 ? 5 : 3
+    );
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Eyes on head
+    if (i === 0) {
+      ctx.fillStyle = '#0a0a1a';
+      const cx = s.x * GRID_SIZE + GRID_SIZE / 2;
+      const cy = s.y * GRID_SIZE + GRID_SIZE / 2;
+      let ex1, ey1, ex2, ey2;
+      const ed = 3;
+      if (direction === DIRECTIONS.RIGHT) {
+        ex1 = cx + 3; ey1 = cy - ed; ex2 = cx + 3; ey2 = cy + ed;
+      } else if (direction === DIRECTIONS.LEFT) {
+        ex1 = cx - 3; ey1 = cy - ed; ex2 = cx - 3; ey2 = cy + ed;
+      } else if (direction === DIRECTIONS.UP) {
+        ex1 = cx - ed; ey1 = cy - 3; ex2 = cx + ed; ey2 = cy - 3;
+      } else {
+        ex1 = cx - ed; ey1 = cy + 3; ex2 = cx + ed; ey2 = cy + 3;
+      }
+      ctx.beginPath();
+      ctx.arc(ex1, ey1, 1.5, 0, Math.PI * 2);
+      ctx.arc(ex2, ey2, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  if (snakeFlashTimer > 0) snakeFlashTimer--;
+}
+
+// ============ HUD ============
+function updateHUD() {
+  document.getElementById('hudScore').textContent = `得分: ${score}`;
+  document.getElementById('hudLength').textContent = `长度: ${snake.length}`;
+  document.getElementById('hudTime').textContent = `${survivalTime}s`;
+}
+
+// ============ GAME OVER ============
+function gameOver() {
+  gameRunning = false;
+  if (animFrameId) cancelAnimationFrame(animFrameId);
+
+  document.getElementById('hud').classList.add('hidden');
+  document.getElementById('pauseBtn').classList.add('hidden');
+
+  // Save score
+  saveScore(score);
+
+  document.getElementById('finalScore').textContent = score;
+  document.getElementById('deathReason').textContent = deathReason;
+  document.getElementById('gameOverScreen').classList.remove('hidden');
+
+  renderLeaderboards();
+}
+
+// ============ PAUSE ============
+function togglePause() {
+  gamePaused = !gamePaused;
+  document.getElementById('pauseBtn').textContent = gamePaused ? '继续' : '暂停';
+  if (!gamePaused) {
+    lastMoveTime = performance.now();
+    lastAutoGrowTime = performance.now();
+    lastSurvivalScoreTime = performance.now();
+  }
+}
+
+// ============ LEADERBOARD (localStorage) ============
+function getWeekKey(date) {
+  const d = new Date(date);
+  const start = new Date(d.getFullYear(), 0, 1);
+  const week = Math.ceil(((d - start) / 86400000 + start.getDay() + 1) / 7);
+  return `${d.getFullYear()}-W${week}`;
+}
+
+function getScores() {
+  try {
+    return JSON.parse(localStorage.getItem('snakeScores') || '[]');
+  } catch { return []; }
+}
+
+function saveScore(score) {
+  const scores = getScores();
+  scores.push({ score, date: Date.now(), week: getWeekKey(new Date()) });
+  localStorage.setItem('snakeScores', JSON.stringify(scores));
+  saveWeeklyChampion(score);
+}
+
+function getCurrentWeekScores() {
+  const currentWeek = getWeekKey(new Date());
+  return getScores().filter(s => s.week === currentWeek).sort((a, b) => b.score - a.score);
+}
+
+function getAllTimeScores() {
+  return getScores().sort((a, b) => b.score - a.score).slice(0, 10);
+}
+
+function saveWeeklyChampion(score) {
+  const champions = getWeeklyChampions();
+  const currentWeek = getWeekKey(new Date());
+  const existing = champions.find(c => c.week === currentWeek);
+  if (existing) {
+    if (score > existing.champion) {
+      existing.runnerUp = existing.champion;
+      existing.champion = score;
+    } else if (score > existing.runnerUp) {
+      existing.runnerUp = score;
+    }
+  } else {
+    champions.push({ week: currentWeek, champion: score, runnerUp: 0 });
+  }
+  // Keep only last 12 weeks
+  while (champions.length > 12) champions.shift();
+  localStorage.setItem('snakeWeeklyChampions', JSON.stringify(champions));
+}
+
+function getWeeklyChampions() {
+  try {
+    return JSON.parse(localStorage.getItem('snakeWeeklyChampions') || '[]');
+  } catch { return []; }
+}
+
+function renderLeaderboardHTML(scores) {
+  if (scores.length === 0) return '<p style="text-align:center;color:#555;font-size:0.8em;">暂无记录</p>';
+  let html = '<table><tr><th>#</th><th>得分</th><th>时间</th></tr>';
+  scores.slice(0, 10).forEach((s, i) => {
+    const rankClass = i < 3 ? `rank-${i + 1}` : '';
+    const date = new Date(s.date);
+    const timeStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+    html += `<tr class="${rankClass}"><td>${i + 1}</td><td>${s.score}</td><td>${timeStr}</td></tr>`;
+  });
+  html += '</table>';
+  return html;
+}
+
+function renderWeeklyChampionsHTML() {
+  const champions = getWeeklyChampions();
+  if (champions.length === 0) return '';
+  let html = '';
+  champions.slice(-4).reverse().forEach(c => {
+    html += `<p>🏆 ${c.week}: 冠军 ${c.champion} | 亚军 ${c.runnerUp || '-'}</p>`;
+  });
+  return html;
+}
+
+function renderLeaderboards() {
+  const weekScores = getCurrentWeekScores();
+  const allScores = getAllTimeScores();
+  const championsHTML = renderWeeklyChampionsHTML();
+
+  const lbHTML = `<h3>本周排行</h3>${renderLeaderboardHTML(weekScores)}`;
+
+  document.getElementById('startLeaderboard').innerHTML = lbHTML;
+  document.getElementById('endLeaderboard').innerHTML = lbHTML;
+  document.getElementById('startWeeklyChampions').innerHTML = championsHTML ? `<h3>历届冠军</h3>${championsHTML}` : '';
+  document.getElementById('endWeeklyChampions').innerHTML = championsHTML ? `<h3>历届冠军</h3>${championsHTML}` : '';
+}
+
+// ============ UTILS ============
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// ============ BOOT ============
+init();
+</script>
+</body>
+</html>
