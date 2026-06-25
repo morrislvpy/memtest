@@ -207,7 +207,6 @@ const DIRECTIONS = {
 
 // ============ STATE ============
 let canvas, ctx;
-let audioCtx = null;
 let cols, rows;
 let snake = [];
 let direction = DIRECTIONS.RIGHT;
@@ -241,108 +240,97 @@ function init() {
 }
 
 // ============ AUDIO (Web Audio API) ============
+let audioCtx = null;
+let bgMusicGain = null;
+
 function ensureAudio() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  return audioCtx;
 }
 
 function playExplosionSound() {
-  ensureAudio();
-  const ctx = audioCtx;
+  const ctx = ensureAudio();
   const now = ctx.currentTime;
+  const sr = ctx.sampleRate;
 
-  // === Layer 1: Deep shockwave boom - the "BONG" ===
-  // Long sine wave that sweeps from mid-low to sub-bass, sustains
-  const boom = ctx.createOscillator();
-  boom.type = 'sine';
-  boom.frequency.setValueAtTime(80, now);
-  boom.frequency.setValueAtTime(60, now + 0.05);
-  boom.frequency.exponentialRampToValueAtTime(30, now + 0.8);
-  const boomGain = ctx.createGain();
-  boomGain.gain.setValueAtTime(0.8, now);
-  boomGain.gain.setValueAtTime(0.7, now + 0.05); // slight sustain
-  boomGain.gain.setValueAtTime(0.5, now + 0.2);
-  boomGain.gain.exponentialRampToValueAtTime(0.01, now + 0.9);
-  boom.connect(boomGain);
-  boomGain.connect(ctx.destination);
-  boom.start(now);
-  boom.stop(now + 0.9);
+  // Generate a 2-second explosion buffer that sounds like a real BOOM
+  const len = sr * 2;
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
 
-  // === Layer 2: Sub-bass body ===
-  const sub = ctx.createOscillator();
-  sub.type = 'sine';
-  sub.frequency.setValueAtTime(40, now);
-  sub.frequency.setValueAtTime(35, now + 0.1);
-  sub.frequency.exponentialRampToValueAtTime(20, now + 1.0);
-  const subGain = ctx.createGain();
-  subGain.gain.setValueAtTime(0.6, now);
-  subGain.gain.setValueAtTime(0.5, now + 0.1);
-  subGain.gain.exponentialRampToValueAtTime(0.01, now + 1.0);
-  sub.connect(subGain);
-  subGain.connect(ctx.destination);
-  sub.start(now);
-  sub.stop(now + 1.0);
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    let sample = 0;
 
-  // === Layer 3: Impact crack (short transient) ===
-  const crackBuf = ctx.sampleRate * 0.1;
-  const crackBuffer = ctx.createBuffer(1, crackBuf, ctx.sampleRate);
-  const crackData = crackBuffer.getChannelData(0);
-  for (let i = 0; i < crackBuf; i++) {
-    crackData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / crackBuf, 4);
+    // Phase 1: Sharp crack (0-30ms) - white noise burst, very loud
+    if (t < 0.03) {
+      const env = Math.pow(1 - t / 0.03, 0.5);
+      sample += (Math.random() * 2 - 1) * env * 1.0;
+    }
+
+    // Phase 2: Shockwave body (10ms-200ms) - mid-frequency thump
+    if (t > 0.01 && t < 0.2) {
+      const env = Math.pow(1 - (t - 0.01) / 0.19, 0.3);
+      const freq = 120 - (t - 0.01) * 400; // sweeps 120→40Hz
+      sample += Math.sin(2 * Math.PI * freq * t) * env * 1.2;
+    }
+
+    // Phase 3: Resonant boom (50ms-800ms) - low sustained ring
+    if (t > 0.05 && t < 0.8) {
+      const env = Math.pow(1 - (t - 0.05) / 0.75, 0.5);
+      sample += Math.sin(2 * Math.PI * 65 * t) * env * 0.8;
+      // Harmonic for richness
+      sample += Math.sin(2 * Math.PI * 130 * t) * env * 0.3;
+    }
+
+    // Phase 4: Rumble tail (200ms-2000ms) - filtered noise
+    if (t > 0.2 && t < 2.0) {
+      const env = Math.pow(1 - (t - 0.2) / 1.8, 1.2);
+      sample += (Math.random() * 2 - 1) * env * 0.5;
+    }
+
+    // Soft clip
+    d[i] = Math.max(-1, Math.min(1, sample));
   }
-  const crackSrc = ctx.createBufferSource();
-  crackSrc.buffer = crackBuffer;
-  const crackGain = ctx.createGain();
-  crackGain.gain.setValueAtTime(0.5, now);
-  crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-  const crackFilter = ctx.createBiquadFilter();
-  crackFilter.type = 'highpass';
-  crackFilter.frequency.value = 500;
-  crackSrc.connect(crackFilter);
-  crackFilter.connect(crackGain);
-  crackGain.connect(ctx.destination);
-  crackSrc.start(now);
-  crackSrc.stop(now + 0.1);
 
-  // === Layer 4: Rumble tail (low noise that decays slowly) ===
-  const rumbleSize = ctx.sampleRate * 0.8;
-  const rumbleBuffer = ctx.createBuffer(1, rumbleSize, ctx.sampleRate);
-  const rumbleData = rumbleBuffer.getChannelData(0);
-  for (let i = 0; i < rumbleSize; i++) {
-    rumbleData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / rumbleSize, 0.8);
-  }
-  const rumbleSrc = ctx.createBufferSource();
-  rumbleSrc.buffer = rumbleBuffer;
-  const rumbleFilter = ctx.createBiquadFilter();
-  rumbleFilter.type = 'lowpass';
-  rumbleFilter.frequency.setValueAtTime(300, now);
-  rumbleFilter.frequency.exponentialRampToValueAtTime(60, now + 0.8);
-  const rumbleGain = ctx.createGain();
-  rumbleGain.gain.setValueAtTime(0.4, now);
-  rumbleGain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
-  rumbleSrc.connect(rumbleFilter);
-  rumbleFilter.connect(rumbleGain);
-  rumbleGain.connect(ctx.destination);
-  rumbleSrc.start(now);
-  rumbleSrc.stop(now + 0.8);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+
+  // Compressor to make it punch through
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -20;
+  comp.knee.value = 10;
+  comp.ratio.value = 4;
+  comp.attack.value = 0.003;
+  comp.release.value = 0.2;
+
+  const gain = ctx.createGain();
+  gain.gain.value = 0.7;
+
+  src.connect(comp);
+  comp.connect(gain);
+  gain.connect(ctx.destination);
+  src.start(now);
 }
 
 function playHealSound() {
-  ensureAudio();
-  const ctx = audioCtx;
+  const ctx = ensureAudio();
   const now = ctx.currentTime;
 
   // Rising chime
   const osc1 = ctx.createOscillator();
   osc1.type = 'sine';
-  osc1.frequency.setValueAtTime(523, now);       // C5
-  osc1.frequency.setValueAtTime(659, now + 0.1);  // E5
-  osc1.frequency.setValueAtTime(784, now + 0.2);  // G5
+  osc1.frequency.setValueAtTime(523, now);
+  osc1.frequency.setValueAtTime(659, now + 0.08);
+  osc1.frequency.setValueAtTime(784, now + 0.16);
   const gain1 = ctx.createGain();
   gain1.gain.setValueAtTime(0.3, now);
-  gain1.gain.setValueAtTime(0.3, now + 0.15);
+  gain1.gain.setValueAtTime(0.3, now + 0.12);
   gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
   osc1.connect(gain1);
   gain1.connect(ctx.destination);
@@ -352,146 +340,141 @@ function playHealSound() {
   // Sparkle
   const osc2 = ctx.createOscillator();
   osc2.type = 'triangle';
-  osc2.frequency.setValueAtTime(1047, now + 0.1); // C6
+  osc2.frequency.value = 1047;
   const gain2 = ctx.createGain();
   gain2.gain.setValueAtTime(0, now);
-  gain2.gain.setValueAtTime(0.2, now + 0.1);
+  gain2.gain.linearRampToValueAtTime(0.2, now + 0.08);
   gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
   osc2.connect(gain2);
   gain2.connect(ctx.destination);
-  osc2.start(now + 0.1);
+  osc2.start(now + 0.08);
   osc2.stop(now + 0.35);
 }
 
 // ============ BACKGROUND MUSIC ============
-let bgMusicNodes = null;
+let bgMusicOscs = null;
 
 function startBgMusic() {
-  ensureAudio();
-  const ctx = audioCtx;
+  const ctx = ensureAudio();
 
-  // Create a quiet, tense ambient loop - frequencies tuned for phone speakers
-  const masterGain = ctx.createGain();
-  masterGain.gain.value = 0.10; // quiet, won't overpower SFX
-  masterGain.connect(ctx.destination);
+  // Master gain - louder to be audible but still under SFX
+  bgMusicGain = ctx.createGain();
+  bgMusicGain.gain.setValueAtTime(0, ctx.currentTime);
+  bgMusicGain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 2); // fade in over 2s
+  bgMusicGain.connect(ctx.destination);
 
-  // Deep pulsing drone - raised to 110Hz (A2) for phone audibility
-  const drone = ctx.createOscillator();
-  drone.type = 'sine';
-  drone.frequency.value = 110;
+  // Drone 1: 110Hz sine - the heartbeat
+  const drone1 = ctx.createOscillator();
+  drone1.type = 'sine';
+  drone1.frequency.value = 110;
+  const drone1Gain = ctx.createGain();
+  drone1Gain.gain.value = 0.35;
+  const drone1Filter = ctx.createBiquadFilter();
+  drone1Filter.type = 'lowpass';
+  drone1Filter.frequency.value = 300;
+  drone1.connect(drone1Filter);
+  drone1Filter.connect(drone1Gain);
+  drone1Gain.connect(bgMusicGain);
 
-  const droneGain = ctx.createGain();
-  droneGain.gain.value = 0.4;
-
-  const droneFilter = ctx.createBiquadFilter();
-  droneFilter.type = 'lowpass';
-  droneFilter.frequency.value = 400;
-
-  drone.connect(droneFilter);
-  droneFilter.connect(droneGain);
-  droneGain.connect(masterGain);
-
-  // Slow LFO on drone for heartbeat pulse
-  const lfo = ctx.createOscillator();
-  lfo.type = 'sine';
-  lfo.frequency.value = 0.3; // heartbeat-like pace
-  const lfoGain = ctx.createGain();
-  lfoGain.gain.value = 0.25;
-  lfo.connect(lfoGain);
-  lfoGain.connect(droneGain.gain);
-
-  // Second drone - detuned for dissonance/tension (114Hz, slightly sharp)
+  // Drone 2: 116Hz sawtooth - detuned dissonance (quiet)
   const drone2 = ctx.createOscillator();
   drone2.type = 'sawtooth';
-  drone2.frequency.value = 114;
-
+  drone2.frequency.value = 116;
   const drone2Gain = ctx.createGain();
-  drone2Gain.gain.value = 0.08;
-
+  drone2Gain.gain.value = 0.06;
   const drone2Filter = ctx.createBiquadFilter();
   drone2Filter.type = 'lowpass';
-  drone2Filter.frequency.value = 300;
-
+  drone2Filter.frequency.value = 250;
   drone2.connect(drone2Filter);
   drone2Filter.connect(drone2Gain);
-  drone2Gain.connect(masterGain);
+  drone2Gain.connect(bgMusicGain);
 
-  // High tension pad (440Hz, triangle wave - eerie)
-  const tension = ctx.createOscillator();
-  tension.type = 'triangle';
-  tension.frequency.value = 440; // A4
+  // Pad: 220Hz + 330Hz triangle - eerie tension
+  const pad1 = ctx.createOscillator();
+  pad1.type = 'triangle';
+  pad1.frequency.value = 220;
+  const pad1Gain = ctx.createGain();
+  pad1Gain.gain.value = 0.1;
+  const pad1Filter = ctx.createBiquadFilter();
+  pad1Filter.type = 'bandpass';
+  pad1Filter.frequency.value = 500;
+  pad1Filter.Q.value = 2;
+  pad1.connect(pad1Filter);
+  pad1Filter.connect(pad1Gain);
+  pad1Gain.connect(bgMusicGain);
 
-  const tensionGain = ctx.createGain();
-  tensionGain.gain.value = 0.08;
+  const pad2 = ctx.createOscillator();
+  pad2.type = 'triangle';
+  pad2.frequency.value = 330;
+  const pad2Gain = ctx.createGain();
+  pad2Gain.gain.value = 0.06;
+  const pad2Filter = ctx.createBiquadFilter();
+  pad2Filter.type = 'bandpass';
+  pad2Filter.frequency.value = 600;
+  pad2Filter.Q.value = 2;
+  pad2.connect(pad2Filter);
+  pad2Filter.connect(pad2Gain);
+  pad2Gain.connect(bgMusicGain);
 
-  const tensionFilter = ctx.createBiquadFilter();
-  tensionFilter.type = 'bandpass';
-  tensionFilter.frequency.value = 600;
-  tensionFilter.Q.value = 3;
+  // LFO: Heartbeat pulse on drone gain
+  const lfo = ctx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = 0.4; // ~24bpm, slow heartbeat
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.2;
+  lfo.connect(lfoGain);
+  lfoGain.connect(drone1Gain.gain);
 
-  tension.connect(tensionFilter);
-  tensionFilter.connect(tensionGain);
-  tensionGain.connect(masterGain);
-
-  // Slow LFO on tension filter for sweeping movement
+  // LFO2: Sweep on pad filter
   const lfo2 = ctx.createOscillator();
   lfo2.type = 'sine';
-  lfo2.frequency.value = 0.1;
+  lfo2.frequency.value = 0.08;
   const lfo2Gain = ctx.createGain();
-  lfo2Gain.gain.value = 300;
+  lfo2Gain.gain.value = 200;
   lfo2.connect(lfo2Gain);
-  lfo2Gain.connect(tensionFilter.frequency);
+  lfo2Gain.connect(pad1Filter.frequency);
 
-  // Subtle high shimmer (880Hz, very quiet)
+  // High note: 660Hz very quiet shimmer
   const shimmer = ctx.createOscillator();
   shimmer.type = 'sine';
-  shimmer.frequency.value = 880;
-
+  shimmer.frequency.value = 660;
   const shimmerGain = ctx.createGain();
-  shimmerGain.gain.value = 0.03;
+  shimmerGain.gain.value = 0.02;
+  shimmer.connect(shimmerGain);
+  shimmerGain.connect(bgMusicGain);
 
-  const shimmerFilter = ctx.createBiquadFilter();
-  shimmerFilter.type = 'bandpass';
-  shimmerFilter.frequency.value = 900;
-  shimmerFilter.Q.value = 8;
-
-  // LFO on shimmer gain for pulsing
+  // LFO3: Pulse shimmer
   const lfo3 = ctx.createOscillator();
   lfo3.type = 'sine';
-  lfo3.frequency.value = 0.5;
+  lfo3.frequency.value = 0.6;
   const lfo3Gain = ctx.createGain();
-  lfo3Gain.gain.value = 0.03;
+  lfo3Gain.gain.value = 0.02;
   lfo3.connect(lfo3Gain);
   lfo3Gain.connect(shimmerGain.gain);
 
-  shimmer.connect(shimmerFilter);
-  shimmerFilter.connect(shimmerGain);
-  shimmerGain.connect(masterGain);
-
-  // Start all
-  drone.start();
+  // Start everything
+  drone1.start();
   drone2.start();
-  tension.start();
+  pad1.start();
+  pad2.start();
   shimmer.start();
   lfo.start();
   lfo2.start();
   lfo3.start();
 
-  bgMusicNodes = { drone, drone2, tension, shimmer, lfo, lfo2, lfo3, masterGain };
+  bgMusicOscs = [drone1, drone2, pad1, pad2, shimmer, lfo, lfo2, lfo3];
 }
 
 function stopBgMusic() {
-  if (bgMusicNodes) {
-    try {
-      bgMusicNodes.drone.stop();
-      bgMusicNodes.drone2.stop();
-      bgMusicNodes.tension.stop();
-      bgMusicNodes.shimmer.stop();
-      bgMusicNodes.lfo.stop();
-      bgMusicNodes.lfo2.stop();
-      bgMusicNodes.lfo3.stop();
-    } catch(e) {}
-    bgMusicNodes = null;
+  if (bgMusicGain) {
+    const ctx = ensureAudio();
+    bgMusicGain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5);
+    const oscs = bgMusicOscs;
+    bgMusicOscs = null;
+    setTimeout(() => {
+      if (oscs) oscs.forEach(o => { try { o.stop(); } catch(e) {} });
+    }, 600);
+    bgMusicGain = null;
   }
 }
 
