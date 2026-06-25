@@ -253,61 +253,80 @@ function playExplosionSound() {
   const ctx = audioCtx;
   const now = ctx.currentTime;
 
-  // Noise burst for explosion - louder and more aggressive
-  const bufferSize = ctx.sampleRate * 0.4;
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) {
-    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 1.5);
+  // === Layer 1: Deep shockwave boom - the "BONG" ===
+  // Long sine wave that sweeps from mid-low to sub-bass, sustains
+  const boom = ctx.createOscillator();
+  boom.type = 'sine';
+  boom.frequency.setValueAtTime(80, now);
+  boom.frequency.setValueAtTime(60, now + 0.05);
+  boom.frequency.exponentialRampToValueAtTime(30, now + 0.8);
+  const boomGain = ctx.createGain();
+  boomGain.gain.setValueAtTime(0.8, now);
+  boomGain.gain.setValueAtTime(0.7, now + 0.05); // slight sustain
+  boomGain.gain.setValueAtTime(0.5, now + 0.2);
+  boomGain.gain.exponentialRampToValueAtTime(0.01, now + 0.9);
+  boom.connect(boomGain);
+  boomGain.connect(ctx.destination);
+  boom.start(now);
+  boom.stop(now + 0.9);
+
+  // === Layer 2: Sub-bass body ===
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(40, now);
+  sub.frequency.setValueAtTime(35, now + 0.1);
+  sub.frequency.exponentialRampToValueAtTime(20, now + 1.0);
+  const subGain = ctx.createGain();
+  subGain.gain.setValueAtTime(0.6, now);
+  subGain.gain.setValueAtTime(0.5, now + 0.1);
+  subGain.gain.exponentialRampToValueAtTime(0.01, now + 1.0);
+  sub.connect(subGain);
+  subGain.connect(ctx.destination);
+  sub.start(now);
+  sub.stop(now + 1.0);
+
+  // === Layer 3: Impact crack (short transient) ===
+  const crackBuf = ctx.sampleRate * 0.1;
+  const crackBuffer = ctx.createBuffer(1, crackBuf, ctx.sampleRate);
+  const crackData = crackBuffer.getChannelData(0);
+  for (let i = 0; i < crackBuf; i++) {
+    crackData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / crackBuf, 4);
   }
-  const noise = ctx.createBufferSource();
-  noise.buffer = buffer;
-
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(2000, now);
-  filter.frequency.exponentialRampToValueAtTime(150, now + 0.3);
-
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.6, now);
-  gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
-
-  noise.connect(filter);
-  filter.connect(gain);
-  gain.connect(ctx.destination);
-  noise.start(now);
-  noise.stop(now + 0.4);
-
-  // Heavy low boom
-  const osc = ctx.createOscillator();
-  osc.type = 'sine';
-  osc.frequency.setValueAtTime(200, now);
-  osc.frequency.exponentialRampToValueAtTime(25, now + 0.3);
-  const oscGain = ctx.createGain();
-  oscGain.gain.setValueAtTime(0.6, now);
-  oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
-  osc.connect(oscGain);
-  oscGain.connect(ctx.destination);
-  osc.start(now);
-  osc.stop(now + 0.35);
-
-  // Distortion crack
-  const crack = ctx.createOscillator();
-  crack.type = 'sawtooth';
-  crack.frequency.setValueAtTime(300, now);
-  crack.frequency.exponentialRampToValueAtTime(50, now + 0.15);
+  const crackSrc = ctx.createBufferSource();
+  crackSrc.buffer = crackBuffer;
   const crackGain = ctx.createGain();
-  crackGain.gain.setValueAtTime(0.25, now);
-  crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+  crackGain.gain.setValueAtTime(0.5, now);
+  crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
   const crackFilter = ctx.createBiquadFilter();
-  crackFilter.type = 'bandpass';
-  crackFilter.frequency.value = 800;
-  crackFilter.Q.value = 2;
-  crack.connect(crackFilter);
+  crackFilter.type = 'highpass';
+  crackFilter.frequency.value = 500;
+  crackSrc.connect(crackFilter);
   crackFilter.connect(crackGain);
   crackGain.connect(ctx.destination);
-  crack.start(now);
-  crack.stop(now + 0.15);
+  crackSrc.start(now);
+  crackSrc.stop(now + 0.1);
+
+  // === Layer 4: Rumble tail (low noise that decays slowly) ===
+  const rumbleSize = ctx.sampleRate * 0.8;
+  const rumbleBuffer = ctx.createBuffer(1, rumbleSize, ctx.sampleRate);
+  const rumbleData = rumbleBuffer.getChannelData(0);
+  for (let i = 0; i < rumbleSize; i++) {
+    rumbleData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / rumbleSize, 0.8);
+  }
+  const rumbleSrc = ctx.createBufferSource();
+  rumbleSrc.buffer = rumbleBuffer;
+  const rumbleFilter = ctx.createBiquadFilter();
+  rumbleFilter.type = 'lowpass';
+  rumbleFilter.frequency.setValueAtTime(300, now);
+  rumbleFilter.frequency.exponentialRampToValueAtTime(60, now + 0.8);
+  const rumbleGain = ctx.createGain();
+  rumbleGain.gain.setValueAtTime(0.4, now);
+  rumbleGain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+  rumbleSrc.connect(rumbleFilter);
+  rumbleFilter.connect(rumbleGain);
+  rumbleGain.connect(ctx.destination);
+  rumbleSrc.start(now);
+  rumbleSrc.stop(now + 0.8);
 }
 
 function playHealSound() {
@@ -353,7 +372,7 @@ function startBgMusic() {
 
   // Create a quiet, tense ambient loop using oscillators
   const masterGain = ctx.createGain();
-  masterGain.gain.value = 0.06; // very quiet
+  masterGain.gain.value = 0.12; // quiet but audible
   masterGain.connect(ctx.destination);
 
   // Deep drone
@@ -1050,8 +1069,8 @@ function draw(timestamp) {
         glowSize = 8 + flashPhase * 5;
       }
     } else {
-      // Solid neon green for all segments - head slightly brighter
-      fillColor = i === 0 ? '#00ff88' : '#00dd66';
+      // Head is bright cyan-white, body is solid neon green
+      fillColor = i === 0 ? '#aaffee' : '#00dd66';
     }
 
     ctx.fillStyle = fillColor;
@@ -1061,8 +1080,8 @@ function draw(timestamp) {
       ctx.shadowColor = glowColor;
       ctx.shadowBlur = glowSize;
     } else if (i === 0) {
-      ctx.shadowColor = '#00ff88';
-      ctx.shadowBlur = 12;
+      ctx.shadowColor = '#00ffee';
+      ctx.shadowBlur = 14;
     }
 
     const padding = i === 0 ? 1 : 2;
