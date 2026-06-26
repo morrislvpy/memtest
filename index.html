@@ -258,8 +258,8 @@ function playExplosionSound() {
   const now = ctx.currentTime;
   const sr = ctx.sampleRate;
 
-  // Short punchy BOOM - total ~0.6s
-  const len = sr * 0.6;
+  // Punchy BOOM with more body - total ~1.0s
+  const len = sr * 1.0;
   const buf = ctx.createBuffer(1, len, sr);
   const d = buf.getChannelData(0);
 
@@ -267,23 +267,32 @@ function playExplosionSound() {
     const t = i / sr;
     let sample = 0;
 
-    // Sharp crack (0-20ms)
-    if (t < 0.02) {
-      const env = Math.pow(1 - t / 0.02, 0.5);
-      sample += (Math.random() * 2 - 1) * env * 0.8;
+    // Sharp crack (0-25ms) - louder, more aggressive
+    if (t < 0.025) {
+      const env = Math.pow(1 - t / 0.025, 0.3);
+      sample += (Math.random() * 2 - 1) * env * 1.0;
     }
 
-    // Impact thump (5ms-150ms) - the BOOM body
-    if (t > 0.005 && t < 0.15) {
-      const env = Math.pow(1 - (t - 0.005) / 0.145, 0.4);
-      const freq = 150 - (t - 0.005) * 600; // 150→60Hz quick sweep
-      sample += Math.sin(2 * Math.PI * freq * t) * env * 1.0;
+    // Impact thump (5ms-300ms) - longer body, the BOOM
+    if (t > 0.005 && t < 0.3) {
+      const env = Math.pow(1 - (t - 0.005) / 0.295, 0.35);
+      const freq = 200 - (t - 0.005) * 500; // 200→50Hz sweep
+      sample += Math.sin(2 * Math.PI * freq * t) * env * 1.2;
+      // Harmonic punch for more "blast" feel
+      sample += Math.sin(2 * Math.PI * freq * 2 * t) * env * 0.3;
     }
 
-    // Resonant tail (30ms-600ms) - quick decay
-    if (t > 0.03 && t < 0.6) {
-      const env = Math.pow(1 - (t - 0.03) / 0.57, 2.0); // fast decay
-      sample += Math.sin(2 * Math.PI * 80 * t) * env * 0.5;
+    // Resonant tail (50ms-1000ms) - medium decay with rumble
+    if (t > 0.05 && t < 1.0) {
+      const env = Math.pow(1 - (t - 0.05) / 0.95, 1.5);
+      sample += Math.sin(2 * Math.PI * 90 * t) * env * 0.6;
+      sample += Math.sin(2 * Math.PI * 45 * t) * env * 0.3; // sub harmonic
+    }
+
+    // Rumble noise (50ms-800ms)
+    if (t > 0.05 && t < 0.8) {
+      const env = Math.pow(1 - (t - 0.05) / 0.75, 1.8);
+      sample += (Math.random() * 2 - 1) * env * 0.25;
     }
 
     d[i] = Math.max(-1, Math.min(1, sample));
@@ -293,13 +302,13 @@ function playExplosionSound() {
   src.buffer = buf;
 
   const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -15;
-  comp.ratio.value = 6;
+  comp.threshold.value = -10;
+  comp.ratio.value = 8;
   comp.attack.value = 0.001;
-  comp.release.value = 0.1;
+  comp.release.value = 0.15;
 
   const gain = ctx.createGain();
-  gain.gain.value = 0.8;
+  gain.gain.value = 0.9;
 
   src.connect(comp);
   comp.connect(gain);
@@ -344,106 +353,145 @@ function playHealSound() {
 let bgMusicOscs = null;
 let bgMusicTimer = null;
 
-// Melody notes in Hz - dramatic minor key motif (C minor)
+// Fast tense rhythm - A minor, ~140bpm, staccato pattern
+// Higher register for phone audibility, aggressive staccato feel
 const BGM_MELODY = [
-  // Bar 1: C3 C3 Eb3 F3
-  { f: 130.81, d: 0.45 }, { f: 130.81, d: 0.45 }, { f: 155.56, d: 0.45 }, { f: 174.61, d: 0.7 },
-  // Bar 2: G3 - F3 Eb3 -
-  { f: 196.00, d: 0.9 }, { f: 174.61, d: 0.45 }, { f: 155.56, d: 0.9 }, { f: 0, d: 0.45 },
-  // Bar 3: C3 C3 Bb2 C3
-  { f: 130.81, d: 0.45 }, { f: 130.81, d: 0.45 }, { f: 116.54, d: 0.45 }, { f: 130.81, d: 0.7 },
-  // Bar 4: Eb3 - - -
-  { f: 155.56, d: 1.8 }, { f: 0, d: 0.9 },
-  // Bar 5: F3 F3 G3 Ab3
-  { f: 174.61, d: 0.45 }, { f: 174.61, d: 0.45 }, { f: 196.00, d: 0.45 }, { f: 207.65, d: 0.7 },
-  // Bar 6: Bb3 - Ab3 G3 -
-  { f: 233.08, d: 0.9 }, { f: 207.65, d: 0.45 }, { f: 196.00, d: 0.9 }, { f: 0, d: 0.45 },
-  // Bar 7: Ab3 G3 F3 Eb3
-  { f: 207.65, d: 0.45 }, { f: 196.00, d: 0.45 }, { f: 174.61, d: 0.45 }, { f: 155.56, d: 0.7 },
-  // Bar 8: C3 - - -
-  { f: 130.81, d: 1.8 }, { f: 0, d: 0.9 },
+  // Bar 1: A4 A4 B4 C5 - B4 A4 - A4
+  { f: 440, d: 0.2 }, { f: 440, d: 0.2 }, { f: 493.88, d: 0.2 }, { f: 523.25, d: 0.2 },
+  { f: 493.88, d: 0.2 }, { f: 440, d: 0.2 }, { f: 0, d: 0.2 }, { f: 440, d: 0.2 },
+  // Bar 2: E5 - E5 - D5 C5 - -
+  { f: 659.25, d: 0.2 }, { f: 0, d: 0.2 }, { f: 659.25, d: 0.2 }, { f: 0, d: 0.2 },
+  { f: 587.33, d: 0.2 }, { f: 523.25, d: 0.2 }, { f: 0, d: 0.2 }, { f: 0, d: 0.4 },
+  // Bar 3: A4 A4 B4 C5 - C5 D5 -
+  { f: 440, d: 0.2 }, { f: 440, d: 0.2 }, { f: 493.88, d: 0.2 }, { f: 523.25, d: 0.2 },
+  { f: 0, d: 0.2 }, { f: 523.25, d: 0.2 }, { f: 587.33, d: 0.2 }, { f: 0, d: 0.4 },
+  // Bar 4: E5 D5 C5 B4 A4 - - -
+  { f: 659.25, d: 0.2 }, { f: 587.33, d: 0.2 }, { f: 523.25, d: 0.2 }, { f: 493.88, d: 0.2 },
+  { f: 440, d: 0.4 }, { f: 0, d: 0.2 }, { f: 0, d: 0.2 }, { f: 0, d: 0.4 },
+  // Bar 5: A4 - A4 C5 E5 - D5 C5
+  { f: 440, d: 0.2 }, { f: 0, d: 0.2 }, { f: 440, d: 0.2 }, { f: 523.25, d: 0.2 },
+  { f: 659.25, d: 0.2 }, { f: 0, d: 0.2 }, { f: 587.33, d: 0.2 }, { f: 523.25, d: 0.2 },
+  // Bar 6: B4 - B4 D5 F5 - E5 D5
+  { f: 493.88, d: 0.2 }, { f: 0, d: 0.2 }, { f: 493.88, d: 0.2 }, { f: 587.33, d: 0.2 },
+  { f: 698.46, d: 0.2 }, { f: 0, d: 0.2 }, { f: 659.25, d: 0.2 }, { f: 587.33, d: 0.2 },
+  // Bar 7: C5 B4 A4 G4# A4 B4 - -
+  { f: 523.25, d: 0.2 }, { f: 493.88, d: 0.2 }, { f: 440, d: 0.2 }, { f: 415.30, d: 0.2 },
+  { f: 440, d: 0.2 }, { f: 493.88, d: 0.4 }, { f: 0, d: 0.2 }, { f: 0, d: 0.4 },
+  // Bar 8: A4 - - - A4 - - -
+  { f: 440, d: 0.2 }, { f: 0, d: 0.2 }, { f: 0, d: 0.2 }, { f: 0, d: 0.2 },
+  { f: 440, d: 0.4 }, { f: 0, d: 0.2 }, { f: 0, d: 0.2 }, { f: 0, d: 0.4 },
 ];
 
-// Bass notes per bar (sustained)
+// Bass pattern - faster, rhythmic
 const BGM_BASS = [
-  65.41, 65.41, 58.27, 65.41, // C2, C2, Bb1, C2
-  87.31, 87.31, 77.78, 65.41   // F2, F2, Eb2, C2
+  [220, 220, 261.63, 220],   // A3 A3 C4 A3
+  [329.63, 329.63, 293.66, 261.63], // E4 E4 D4 C4
+  [220, 220, 261.63, 293.66], // A3 A3 C4 D4
+  [329.63, 293.66, 261.63, 220], // E4 D4 C4 A3
+  [220, 220, 261.63, 329.63], // A3 A3 C4 E4
+  [246.94, 246.94, 293.66, 349.23], // B3 B3 D4 F4
+  [261.63, 220, 207.65, 220], // C4 A3 G#3 A3
+  [220, 220, 220, 220],       // A3 A3 A3 A3
 ];
 
 function startBgMusic() {
   const ctx = ensureAudio();
 
-  // Master gain
+  // Master gain - louder
   bgMusicGain = ctx.createGain();
   bgMusicGain.gain.setValueAtTime(0, ctx.currentTime);
-  bgMusicGain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 3);
+  bgMusicGain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + 2);
   bgMusicGain.connect(ctx.destination);
-
-  // Play melody in a loop
-  let noteIndex = 0;
-  let barIndex = 0;
 
   function scheduleMelodyLoop() {
     if (!bgMusicGain) return;
 
     const now = ctx.currentTime;
     let t = now;
+    const barLen = 0.2 * 8; // 8 notes per bar, 0.2s each = 1.6s per bar
 
-    // Schedule all melody notes
     for (let n = 0; n < BGM_MELODY.length; n++) {
       const note = BGM_MELODY[n];
       if (note.f > 0) {
-        // Main melody voice (triangle - string-like)
+        // Main melody - square wave for sharper, more urgent attack
         const osc = ctx.createOscillator();
-        osc.type = 'triangle';
+        osc.type = 'square';
         osc.frequency.value = note.f;
         const gain = ctx.createGain();
         gain.gain.setValueAtTime(0, t);
-        gain.gain.linearRampToValueAtTime(0.22, t + 0.05);
-        gain.gain.setValueAtTime(0.18, t + note.d * 0.6);
-        gain.gain.linearRampToValueAtTime(0, t + note.d * 0.95);
-        osc.connect(gain);
+        gain.gain.linearRampToValueAtTime(0.12, t + 0.01); // fast attack
+        gain.gain.setValueAtTime(0.10, t + note.d * 0.3);
+        gain.gain.linearRampToValueAtTime(0, t + note.d * 0.85); // staccato
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 2000;
+        osc.connect(filter);
+        filter.connect(gain);
         gain.connect(bgMusicGain);
         osc.start(t);
         osc.stop(t + note.d);
 
-        // Octave doubling (sine, quieter, for richness)
+        // Octave above (sine, very quiet sparkle)
         const osc2 = ctx.createOscillator();
         osc2.type = 'sine';
         osc2.frequency.value = note.f * 2;
         const gain2 = ctx.createGain();
         gain2.gain.setValueAtTime(0, t);
-        gain2.gain.linearRampToValueAtTime(0.06, t + 0.05);
-        gain2.gain.linearRampToValueAtTime(0, t + note.d * 0.9);
+        gain2.gain.linearRampToValueAtTime(0.04, t + 0.01);
+        gain2.gain.linearRampToValueAtTime(0, t + note.d * 0.7);
         osc2.connect(gain2);
         gain2.connect(bgMusicGain);
         osc2.start(t);
         osc2.stop(t + note.d);
       }
 
-      // Bass note per bar - schedule when bar changes
-      const barLen = 2.7; // approximate bar duration
-      if (n % 4 === 0) {
-        const bi = Math.floor(n / 4) % BGM_BASS.length;
+      // Bass note - on every beat (every 2 melody notes)
+      if (n % 2 === 0) {
+        const barIdx = Math.floor(n / 8);
+        const beatIdx = Math.floor((n % 8) / 2);
+        const bassBar = BGM_BASS[barIdx % BGM_BASS.length];
+        const bassFreq = bassBar[beatIdx % bassBar.length];
+
         const bassOsc = ctx.createOscillator();
-        bassOsc.type = 'sine';
-        bassOsc.frequency.value = BGM_BASS[bi];
+        bassOsc.type = 'sawtooth';
+        bassOsc.frequency.value = bassFreq;
         const bassGain = ctx.createGain();
         bassGain.gain.setValueAtTime(0, t);
-        bassGain.gain.linearRampToValueAtTime(0.15, t + 0.1);
-        bassGain.gain.setValueAtTime(0.12, t + barLen * 0.7);
-        bassGain.gain.linearRampToValueAtTime(0, t + barLen * 0.95);
-        bassOsc.connect(bassGain);
+        bassGain.gain.linearRampToValueAtTime(0.08, t + 0.01);
+        bassGain.gain.setValueAtTime(0.06, t + 0.3);
+        bassGain.gain.linearRampToValueAtTime(0, t + 0.38);
+        const bassFilter = ctx.createBiquadFilter();
+        bassFilter.type = 'lowpass';
+        bassFilter.frequency.value = 500;
+        bassOsc.connect(bassFilter);
+        bassFilter.connect(bassGain);
         bassGain.connect(bgMusicGain);
         bassOsc.start(t);
-        bassOsc.stop(t + barLen);
+        bassOsc.stop(t + 0.4);
+
+        // Rhythmic kick-like hit on every bass note
+        const kickLen = ctx.sampleRate * 0.08;
+        const kickBuf = ctx.createBuffer(1, kickLen, ctx.sampleRate);
+        const kickData = kickBuf.getChannelData(0);
+        for (let k = 0; k < kickLen; k++) {
+          const kt = k / ctx.sampleRate;
+          const kickFreq = 150 * Math.exp(-kt * 40);
+          kickData[k] = Math.sin(2 * Math.PI * kickFreq * kt) * Math.exp(-kt * 30) * 0.3;
+        }
+        const kickSrc = ctx.createBufferSource();
+        kickSrc.buffer = kickBuf;
+        const kickGain = ctx.createGain();
+        kickGain.gain.value = 0.15;
+        kickSrc.connect(kickGain);
+        kickGain.connect(bgMusicGain);
+        kickSrc.start(t);
       }
 
       t += note.d;
     }
 
     const loopDuration = t - now;
-    bgMusicTimer = setTimeout(scheduleMelodyLoop, (loopDuration - 0.1) * 1000);
+    bgMusicTimer = setTimeout(scheduleMelodyLoop, (loopDuration - 0.05) * 1000);
   }
 
   scheduleMelodyLoop();
