@@ -1131,38 +1131,66 @@ function draw(timestamp) {
     }
 
     const padding = i === 0 ? 1 : 2;
-    // Make flashing segments slightly larger
-    const shrink = effect ? 0 : 1;
-    ctx.beginPath();
-    ctx.roundRect(
-      s.x * GRID_SIZE + padding - shrink,
-      s.y * GRID_SIZE + padding - shrink,
-      GRID_SIZE - (padding - shrink) * 2,
-      GRID_SIZE - (padding - shrink) * 2,
-      i === 0 ? 5 : 3
-    );
-    ctx.fill();
+    const gs = GRID_SIZE;
+    const cx = s.x * gs + gs / 2;
+    const cy = s.y * gs + gs / 2;
+
+    if (i === 0) {
+      // Snake head: triangle shape, wider than body
+      const halfW = gs * 0.55; // wider than body
+      const halfL = gs * 0.5;
+      ctx.beginPath();
+      if (direction === DIRECTIONS.RIGHT) {
+        ctx.moveTo(cx + halfL, cy);          // tip (front)
+        ctx.lineTo(cx - halfL * 0.4, cy - halfW); // top-left
+        ctx.lineTo(cx - halfL * 0.4, cy + halfW); // bottom-left
+      } else if (direction === DIRECTIONS.LEFT) {
+        ctx.moveTo(cx - halfL, cy);
+        ctx.lineTo(cx + halfL * 0.4, cy - halfW);
+        ctx.lineTo(cx + halfL * 0.4, cy + halfW);
+      } else if (direction === DIRECTIONS.UP) {
+        ctx.moveTo(cx, cy - halfL);
+        ctx.lineTo(cx - halfW, cy + halfL * 0.4);
+        ctx.lineTo(cx + halfW, cy + halfL * 0.4);
+      } else {
+        ctx.moveTo(cx, cy + halfL);
+        ctx.lineTo(cx - halfW, cy - halfL * 0.4);
+        ctx.lineTo(cx + halfW, cy - halfL * 0.4);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Body segments: rounded rectangle
+      const shrink = effect ? 0 : 1;
+      ctx.beginPath();
+      ctx.roundRect(
+        s.x * gs + padding - shrink,
+        s.y * gs + padding - shrink,
+        gs - (padding - shrink) * 2,
+        gs - (padding - shrink) * 2,
+        3
+      );
+      ctx.fill();
+    }
     ctx.shadowBlur = 0;
 
     // Eyes on head
     if (i === 0) {
-      ctx.fillStyle = '#0a0a1a';
-      const cx = s.x * GRID_SIZE + GRID_SIZE / 2;
-      const cy = s.y * GRID_SIZE + GRID_SIZE / 2;
+      ctx.fillStyle = '#ff2222';
+      const ed = gs * 0.22;
       let ex1, ey1, ex2, ey2;
-      const ed = 3;
       if (direction === DIRECTIONS.RIGHT) {
-        ex1 = cx + 3; ey1 = cy - ed; ex2 = cx + 3; ey2 = cy + ed;
+        ex1 = cx + gs * 0.15; ey1 = cy - ed; ex2 = cx + gs * 0.15; ey2 = cy + ed;
       } else if (direction === DIRECTIONS.LEFT) {
-        ex1 = cx - 3; ey1 = cy - ed; ex2 = cx - 3; ey2 = cy + ed;
+        ex1 = cx - gs * 0.15; ey1 = cy - ed; ex2 = cx - gs * 0.15; ey2 = cy + ed;
       } else if (direction === DIRECTIONS.UP) {
-        ex1 = cx - ed; ey1 = cy - 3; ex2 = cx + ed; ey2 = cy - 3;
+        ex1 = cx - ed; ey1 = cy - gs * 0.15; ex2 = cx + ed; ey2 = cy - gs * 0.15;
       } else {
-        ex1 = cx - ed; ey1 = cy + 3; ex2 = cx + ed; ey2 = cy + 3;
+        ex1 = cx - ed; ey1 = cy + gs * 0.15; ex2 = cx + ed; ey2 = cy + gs * 0.15;
       }
       ctx.beginPath();
-      ctx.arc(ex1, ey1, 1.5, 0, Math.PI * 2);
-      ctx.arc(ex2, ey2, 1.5, 0, Math.PI * 2);
+      ctx.arc(ex1, ey1, 2, 0, Math.PI * 2);
+      ctx.arc(ex2, ey2, 2, 0, Math.PI * 2);
       ctx.fill();
     }
   }
