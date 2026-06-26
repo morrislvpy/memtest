@@ -1130,34 +1130,22 @@ function draw(timestamp) {
       ctx.shadowBlur = 14;
     }
 
-    const padding = i === 0 ? 1 : 2;
+    const padding = i === 0 ? 0 : 2;
     const gs = GRID_SIZE;
     const cx = s.x * gs + gs / 2;
     const cy = s.y * gs + gs / 2;
 
     if (i === 0) {
-      // Snake head: triangle shape, wider than body
-      const halfW = gs * 0.55; // wider than body
-      const halfL = gs * 0.5;
+      // Snake head: square, slightly wider than body
+      const shrink = effect ? 0 : 1;
       ctx.beginPath();
-      if (direction === DIRECTIONS.RIGHT) {
-        ctx.moveTo(cx + halfL, cy);          // tip (front)
-        ctx.lineTo(cx - halfL * 0.4, cy - halfW); // top-left
-        ctx.lineTo(cx - halfL * 0.4, cy + halfW); // bottom-left
-      } else if (direction === DIRECTIONS.LEFT) {
-        ctx.moveTo(cx - halfL, cy);
-        ctx.lineTo(cx + halfL * 0.4, cy - halfW);
-        ctx.lineTo(cx + halfL * 0.4, cy + halfW);
-      } else if (direction === DIRECTIONS.UP) {
-        ctx.moveTo(cx, cy - halfL);
-        ctx.lineTo(cx - halfW, cy + halfL * 0.4);
-        ctx.lineTo(cx + halfW, cy + halfL * 0.4);
-      } else {
-        ctx.moveTo(cx, cy + halfL);
-        ctx.lineTo(cx - halfW, cy - halfL * 0.4);
-        ctx.lineTo(cx + halfW, cy - halfL * 0.4);
-      }
-      ctx.closePath();
+      ctx.roundRect(
+        s.x * gs - 1 - shrink,
+        s.y * gs - 1 - shrink,
+        gs + 2 + shrink * 2,
+        gs + 2 + shrink * 2,
+        4
+      );
       ctx.fill();
     } else {
       // Body segments: rounded rectangle
