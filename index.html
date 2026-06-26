@@ -202,8 +202,7 @@ const MISSILE_SPEED = 1.54;
 const SNAKE_SPEED = 169; // ms per move
 const SUPER_PILL_LENGTH_TRIGGER = 30; // snake length to trigger super pill
 const SUPER_PILL_LIFETIME = 3000; // ms
-const SUPER_PILL_MAX_COUNT = 3; // max super pills per game
-const SUPER_PILL_COOLDOWN = 8000; // ms between super pills
+const SUPER_PILL_COOLDOWN_RANGE = [8000, 15000]; // random 8-15s between super pills
 const DIFFICULTY_UP_INTERVAL = 30000; // ms, every 30s difficulty increases
 const DIRECTIONS = {
   UP: { x: 0, y: -1 },
@@ -224,9 +223,9 @@ let particles = []; // visual effects particles
 let segmentEffects = []; // { index, color, timer, maxTimer }
 let scorePopups = []; // { x, y, text, color, timer, maxTimer }
 let superPill = null; // { x, y, spawnTime, alpha }
-let superPillCount = 0; // how many super pills have appeared this game
 let superPillTriggered = false; // whether current length threshold was already triggered
 let superPillLastTime = 0; // timestamp of last super pill end
+let superPillNextCooldown = 0; // next random cooldown duration in ms
 let difficultyLevel = 1; // increases over time, affects missile count/speed and pill count
 let lastDifficultyUpTime = 0;
 let score = 0;
@@ -612,9 +611,9 @@ function startGame() {
   segmentEffects = [];
   scorePopups = [];
   superPill = null;
-  superPillCount = 0;
   superPillTriggered = false;
   superPillLastTime = 0;
+  superPillNextCooldown = 0;
   difficultyLevel = 1;
   lastDifficultyUpTime = 0;
   score = 0;
@@ -943,7 +942,7 @@ function updatePills(timestamp) {
 
 // ============ SUPER PILL ============
 function spawnSuperPill() {
-  if (superPill || superPillCount >= SUPER_PILL_MAX_COUNT) return;
+  if (superPill) return;
   let px, py, attempts = 0;
   do {
     px = randInt(2, cols - 3);
@@ -953,20 +952,23 @@ function spawnSuperPill() {
 
   if (attempts < 80) {
     superPill = { x: px, y: py, spawnTime: performance.now(), alpha: 1 };
-    superPillCount++;
     superPillTriggered = true;
   }
 }
 
 function updateSuperPill(timestamp) {
-  // Trigger: snake exceeds length threshold and no super pill active and cooldown passed
-  const cooldownOk = !superPillLastTime || (timestamp - superPillLastTime) >= SUPER_PILL_COOLDOWN;
-  if (!superPill && !superPillTriggered && snake.length >= SUPER_PILL_LENGTH_TRIGGER && superPillCount < SUPER_PILL_MAX_COUNT && cooldownOk) {
-    spawnSuperPill();
-  }
-  // Reset trigger when length drops below threshold (allows re-trigger)
+  // Reset trigger when length drops below threshold
+  // Only when length reaches 30+ again will super pills re-appear
   if (snake.length < SUPER_PILL_LENGTH_TRIGGER) {
     superPillTriggered = false;
+  }
+
+  // Trigger: snake exceeds length threshold, no super pill active, cooldown passed
+  if (!superPill && !superPillTriggered && snake.length >= SUPER_PILL_LENGTH_TRIGGER) {
+    const cooldownOk = !superPillLastTime || (timestamp - superPillLastTime) >= superPillNextCooldown;
+    if (cooldownOk) {
+      spawnSuperPill();
+    }
   }
 
   if (!superPill) return;
@@ -975,8 +977,9 @@ function updateSuperPill(timestamp) {
   if (age >= SUPER_PILL_LIFETIME) {
     // Expired
     superPill = null;
-    superPillTriggered = false; // allow re-trigger
+    superPillTriggered = false; // allow re-trigger if still >= 30
     superPillLastTime = performance.now(); // start cooldown
+    superPillNextCooldown = randInt(SUPER_PILL_COOLDOWN_RANGE[0], SUPER_PILL_COOLDOWN_RANGE[1]); // random 8-15s
     return;
   }
   // Blink in last 1.5s
@@ -1000,6 +1003,7 @@ function activateSuperPill() {
   superPill = null;
   superPillTriggered = false;
   superPillLastTime = performance.now(); // start cooldown
+  superPillNextCooldown = randInt(SUPER_PILL_COOLDOWN_RANGE[0], SUPER_PILL_COOLDOWN_RANGE[1]); // random 8-15s
 
   // 1. Halve snake length (minimum 3)
   const targetLen = Math.max(3, Math.floor(snake.length / 2));
@@ -1227,15 +1231,6 @@ function draw(timestamp) {
     ctx.lineTo(cx, cy + 6);
     ctx.stroke();
 
-    // Remaining count indicator below
-    const remaining = SUPER_PILL_MAX_COUNT - superPillCount;
-    ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.shadowColor = '#ffd700';
-    ctx.shadowBlur = 4;
-    ctx.fillText(remaining > 0 ? `x${remaining}` : '', cx, baseY + h + 3);
     ctx.shadowBlur = 0;
 
     ctx.restore();
