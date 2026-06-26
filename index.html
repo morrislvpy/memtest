@@ -160,6 +160,7 @@
   <span class="hud-score" id="hudScore">得分: 0</span>
   <span class="hud-length" id="hudLength">长度: 3</span>
   <span class="hud-time" id="hudTime">0s</span>
+  <span style="color:#ff6644" id="hudDifficulty">Lv1</span>
 </div>
 <button id="pauseBtn" class="hidden" onclick="togglePause()">暂停</button>
 
@@ -199,9 +200,11 @@ const PILL_SCORE = 10;
 const SURVIVAL_SCORE_INTERVAL = 1000; // ms
 const MISSILE_SPEED = 1.54;
 const SNAKE_SPEED = 169; // ms per move
-const SUPER_PILL_LENGTH_TRIGGER = 15; // snake length to trigger super pill
+const SUPER_PILL_LENGTH_TRIGGER = 30; // snake length to trigger super pill
 const SUPER_PILL_LIFETIME = 3000; // ms
 const SUPER_PILL_MAX_COUNT = 3; // max super pills per game
+const SUPER_PILL_COOLDOWN = 8000; // ms between super pills
+const DIFFICULTY_UP_INTERVAL = 30000; // ms, every 30s difficulty increases
 const DIRECTIONS = {
   UP: { x: 0, y: -1 },
   DOWN: { x: 0, y: 1 },
@@ -223,6 +226,9 @@ let scorePopups = []; // { x, y, text, color, timer, maxTimer }
 let superPill = null; // { x, y, spawnTime, alpha }
 let superPillCount = 0; // how many super pills have appeared this game
 let superPillTriggered = false; // whether current length threshold was already triggered
+let superPillLastTime = 0; // timestamp of last super pill end
+let difficultyLevel = 1; // increases over time, affects missile count/speed and pill count
+let lastDifficultyUpTime = 0;
 let score = 0;
 let survivalTime = 0;
 let gameRunning = false;
@@ -608,6 +614,9 @@ function startGame() {
   superPill = null;
   superPillCount = 0;
   superPillTriggered = false;
+  superPillLastTime = 0;
+  difficultyLevel = 1;
+  lastDifficultyUpTime = 0;
   score = 0;
   survivalTime = 0;
   gameRunning = true;
@@ -619,7 +628,8 @@ function startGame() {
   pillSpawnTimer = 0;
 
   // Spawn initial missiles
-  const mCount = randInt(MISSILE_COUNT_RANGE[0], MISSILE_COUNT_RANGE[1]);
+  const mRange = getMissileCountRange();
+  const mCount = randInt(mRange[0], mRange[1]);
   for (let i = 0; i < mCount; i++) spawnMissile();
 
   // Spawn initial pills
@@ -666,6 +676,17 @@ function gameLoop(timestamp) {
     }
   }
 
+  // Difficulty increase every 30 seconds
+  if (!lastDifficultyUpTime) lastDifficultyUpTime = timestamp;
+  if (timestamp - lastDifficultyUpTime >= DIFFICULTY_UP_INTERVAL) {
+    lastDifficultyUpTime = timestamp;
+    difficultyLevel++;
+    // Spawn additional missiles for new difficulty
+    const newRange = getMissileCountRange();
+    const targetCount = randInt(newRange[0], newRange[1]);
+    while (missiles.length < targetCount) spawnMissile();
+  }
+
   // Update missiles
   updateMissiles();
 
@@ -679,7 +700,8 @@ function gameLoop(timestamp) {
   pillSpawnTimer += 16;
   if (pillSpawnTimer >= 4000) {
     pillSpawnTimer = 0;
-    if (pills.length < PILL_COUNT_RANGE[1]) spawnPills();
+    const pRange = getPillCountRange();
+    if (pills.length < pRange[1]) spawnPills();
   }
 
   // Super pill logic
@@ -780,7 +802,7 @@ function autoGrow() {
 function spawnMissile() {
   const edge = randInt(0, 3); // 0=top, 1=right, 2=bottom, 3=left
   let x, y, vx, vy;
-  const speed = MISSILE_SPEED * (0.7 + Math.random() * 0.6);
+  const speed = getMissileSpeed() * (0.7 + Math.random() * 0.6);
 
   switch(edge) {
     case 0: // top
@@ -841,7 +863,9 @@ function updateMissiles() {
     // Remove if off screen
     if (m.x < -50 || m.x > canvas.width + 50 || m.y < -50 || m.y > canvas.height + 50) {
       missiles.splice(i, 1);
-      spawnMissile(); // Respawn
+      // Respawn, keeping count within difficulty range
+      const range = getMissileCountRange();
+      if (missiles.length < range[1]) spawnMissile();
     }
   }
 }
@@ -869,7 +893,8 @@ function checkMissileCollision() {
         }
         // Remove missile and respawn
         missiles.splice(i, 1);
-        spawnMissile();
+        const range = getMissileCountRange();
+        if (missiles.length < range[1]) spawnMissile();
         break;
       }
     }
@@ -878,9 +903,10 @@ function checkMissileCollision() {
 
 // ============ PILLS ============
 function spawnPills() {
-  const count = randInt(PILL_COUNT_RANGE[0], PILL_COUNT_RANGE[1]);
+  const pRange = getPillCountRange();
+  const count = randInt(pRange[0], pRange[1]);
   const currentPillCount = pills.length;
-  const toSpawn = Math.min(count, PILL_COUNT_RANGE[1] - currentPillCount);
+  const toSpawn = Math.min(count, pRange[1] - currentPillCount);
 
   for (let i = 0; i < toSpawn; i++) {
     let px, py, attempts = 0;
@@ -933,8 +959,9 @@ function spawnSuperPill() {
 }
 
 function updateSuperPill(timestamp) {
-  // Trigger: snake exceeds length threshold and no super pill active
-  if (!superPill && !superPillTriggered && snake.length >= SUPER_PILL_LENGTH_TRIGGER && superPillCount < SUPER_PILL_MAX_COUNT) {
+  // Trigger: snake exceeds length threshold and no super pill active and cooldown passed
+  const cooldownOk = !superPillLastTime || (timestamp - superPillLastTime) >= SUPER_PILL_COOLDOWN;
+  if (!superPill && !superPillTriggered && snake.length >= SUPER_PILL_LENGTH_TRIGGER && superPillCount < SUPER_PILL_MAX_COUNT && cooldownOk) {
     spawnSuperPill();
   }
   // Reset trigger when length drops below threshold (allows re-trigger)
@@ -949,6 +976,7 @@ function updateSuperPill(timestamp) {
     // Expired
     superPill = null;
     superPillTriggered = false; // allow re-trigger
+    superPillLastTime = performance.now(); // start cooldown
     return;
   }
   // Blink in last 1.5s
@@ -958,18 +986,20 @@ function updateSuperPill(timestamp) {
     superPill.alpha = 1;
   }
 
-  // Check collision with snake head
+  // Check collision with snake head (any of the 4 cells)
   const head = snake[0];
-  if (head.x === superPill.x && head.y === superPill.y) {
+  if ((head.x === superPill.x || head.x === superPill.x + 1) &&
+      (head.y === superPill.y || head.y === superPill.y + 1)) {
     activateSuperPill();
   }
 }
 
 function activateSuperPill() {
-  const px = superPill.x * GRID_SIZE + GRID_SIZE / 2;
-  const py = superPill.y * GRID_SIZE + GRID_SIZE / 2;
+  const px = superPill.x * GRID_SIZE + GRID_SIZE;
+  const py = superPill.y * GRID_SIZE + GRID_SIZE;
   superPill = null;
   superPillTriggered = false;
+  superPillLastTime = performance.now(); // start cooldown
 
   // 1. Halve snake length (minimum 3)
   const targetLen = Math.max(3, Math.floor(snake.length / 2));
@@ -992,7 +1022,8 @@ function activateSuperPill() {
   // Respawn missiles after a short delay
   setTimeout(() => {
     if (gameRunning && !gamePaused) {
-      const mCount = randInt(MISSILE_COUNT_RANGE[0], MISSILE_COUNT_RANGE[1]);
+      const mRange = getMissileCountRange();
+      const mCount = randInt(mRange[0], mRange[1]);
       for (let i = 0; i < mCount; i++) spawnMissile();
     }
   }, 2000);
@@ -1156,61 +1187,56 @@ function draw(timestamp) {
     ctx.restore();
   }
 
-  // Draw super pill (star shape, golden)
+  // Draw super pill (2x2 grid, same cross shape as regular pill but golden and bigger)
   if (superPill) {
-    const cx = superPill.x * GRID_SIZE + GRID_SIZE / 2;
-    const cy = superPill.y * GRID_SIZE + GRID_SIZE / 2;
-    const pulse = Math.sin(timestamp * 0.01) * 3;
-    const outerR = GRID_SIZE / 2 + 2 + pulse;
-    const innerR = outerR * 0.45;
-    const points = 6;
+    const baseX = superPill.x * GRID_SIZE;
+    const baseY = superPill.y * GRID_SIZE;
+    const w = GRID_SIZE * 2;
+    const h = GRID_SIZE * 2;
+    const cx = baseX + w / 2;
+    const cy = baseY + h / 2;
+    const pulse = Math.sin(timestamp * 0.008) * 3;
 
     ctx.save();
     ctx.globalAlpha = superPill.alpha;
 
     // Big glow
-    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR * 3);
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, w + pulse);
     glow.addColorStop(0, 'rgba(255, 215, 0, 0.4)');
     glow.addColorStop(0.5, 'rgba(255, 180, 0, 0.15)');
     glow.addColorStop(1, 'rgba(255, 215, 0, 0)');
     ctx.fillStyle = glow;
-    ctx.fillRect(cx - outerR * 3, cy - outerR * 3, outerR * 6, outerR * 6);
+    ctx.fillRect(cx - w - pulse, cy - w - pulse, (w + pulse) * 2, (w + pulse) * 2);
 
-    // Star shape
+    // Pill body (2x2 rounded rect, golden)
     ctx.fillStyle = '#ffd700';
     ctx.shadowColor = '#ffd700';
-    ctx.shadowBlur = 15;
+    ctx.shadowBlur = 18;
     ctx.beginPath();
-    for (let i = 0; i < points * 2; i++) {
-      const r = i % 2 === 0 ? outerR : innerR;
-      const angle = (Math.PI * 2 / (points * 2)) * i - Math.PI / 2;
-      const x = cx + Math.cos(angle) * r;
-      const y = cy + Math.sin(angle) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
+    ctx.roundRect(baseX + 2, baseY + 2, w - 4, h - 4, 6);
     ctx.fill();
 
-    // Inner highlight
+    // Cross symbol (same as regular pill but bigger)
     ctx.shadowBlur = 0;
-    ctx.fillStyle = '#fff8dc';
+    ctx.strokeStyle = '#0a0a1a';
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(cx, cy, innerR * 0.6, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.moveTo(cx - 6, cy);
+    ctx.lineTo(cx + 6, cy);
+    ctx.moveTo(cx, cy - 6);
+    ctx.lineTo(cx, cy + 6);
+    ctx.stroke();
 
-    // "S" letter
-    ctx.fillStyle = '#b8860b';
-    ctx.font = 'bold 9px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('S', cx, cy + 1);
-
-    // Remaining count indicator
+    // Remaining count indicator below
     const remaining = SUPER_PILL_MAX_COUNT - superPillCount;
-    ctx.fillStyle = 'rgba(255, 215, 0, 0.6)';
-    ctx.font = '8px sans-serif';
-    ctx.fillText(remaining > 0 ? `x${remaining}` : '', cx, cy + outerR + 8);
+    ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur = 4;
+    ctx.fillText(remaining > 0 ? `x${remaining}` : '', cx, baseY + h + 3);
+    ctx.shadowBlur = 0;
 
     ctx.restore();
   }
@@ -1434,6 +1460,7 @@ function updateHUD() {
   document.getElementById('hudScore').textContent = `得分: ${score}`;
   document.getElementById('hudLength').textContent = `长度: ${snake.length}`;
   document.getElementById('hudTime').textContent = `${survivalTime}s`;
+  document.getElementById('hudDifficulty').textContent = `Lv${difficultyLevel}`;
 }
 
 // ============ GAME OVER ============
@@ -1560,6 +1587,21 @@ function renderLeaderboards() {
 // ============ UTILS ============
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// 难度缩放辅助函数
+function getMissileCountRange() {
+  const bonus = Math.floor((difficultyLevel - 1) / 2);
+  return [MISSILE_COUNT_RANGE[0] + bonus, MISSILE_COUNT_RANGE[1] + bonus];
+}
+
+function getMissileSpeed() {
+  return MISSILE_SPEED * (1 + (difficultyLevel - 1) * 0.08);
+}
+
+function getPillCountRange() {
+  const bonus = Math.floor((difficultyLevel - 1) / 2);
+  return [PILL_COUNT_RANGE[0] + bonus, PILL_COUNT_RANGE[1] + bonus];
 }
 
 // ============ BOOT ============
