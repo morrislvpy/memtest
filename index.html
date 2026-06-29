@@ -150,6 +150,27 @@
     font-size: 0.85em;
     cursor: pointer;
   }
+  .nickname-input {
+    margin-top: 0.8em;
+    padding: 10px 20px;
+    font-size: 1.1em;
+    border: 2px solid #00ccff;
+    border-radius: 20px;
+    background: rgba(10,10,26,0.8);
+    color: #e0e0ff;
+    text-align: center;
+    width: 200px;
+    outline: none;
+  }
+  .nickname-input:focus { border-color: #00ff88; box-shadow: 0 0 12px rgba(0,255,136,0.3); }
+  .nickname-input::placeholder { color: #556; }
+  #levelUpScreen h1 {
+    font-size: 2.5em;
+    background: linear-gradient(90deg, #ffd700, #ff66cc, #00ccff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.3em;
+  }
 </style>
 </head>
 <body>
@@ -161,16 +182,19 @@
   <span class="hud-length" id="hudLength">长度: 3</span>
   <span class="hud-time" id="hudTime">0s</span>
   <span style="color:#ff6644" id="hudDifficulty">Lv1</span>
+  <span style="color:#ff66cc" id="hudLevel">第1关</span>
 </div>
 <button id="pauseBtn" class="hidden" onclick="togglePause()">暂停</button>
 
 <!-- Start Screen -->
 <div id="startScreen" class="overlay">
   <h1>贪吃蛇大作战</h1>
+  <input type="text" class="nickname-input" id="nicknameInput" placeholder="输入你的昵称" maxlength="12" autocomplete="off">
   <p>蛇身每5秒自动增长1单位</p>
   <p>躲避导弹！被击中蛇身+1</p>
   <p>吃掉药片缩短2单位，+10分</p>
-  <p>蛇过长时出现超级药包(金星)，缩短一半+全弹爆破</p>
+  <p>蛇过长时出现超级药包，缩短一半+全弹爆破</p>
+  <p>超过1000分晋级下一关</p>
   <p>滑动屏幕控制方向</p>
   <button class="btn" onclick="startGame()">开始游戏</button>
   <div class="leaderboard" id="startLeaderboard"></div>
@@ -182,9 +206,18 @@
   <h2>游戏结束</h2>
   <div class="score-display" id="finalScore">0</div>
   <p id="deathReason"></p>
+  <p id="finalLevel" style="color:#ff66cc;font-size:1.1em;"></p>
   <button class="btn" onclick="startGame()">再来一局</button>
   <div class="leaderboard" id="endLeaderboard"></div>
   <div class="weekly-champions" id="endWeeklyChampions"></div>
+</div>
+
+<!-- Level Up Screen -->
+<div id="levelUpScreen" class="overlay hidden">
+  <h1>晋级！</h1>
+  <div class="score-display" id="levelUpText" style="color:#ffd700;">第2关</div>
+  <p id="levelUpDesc" style="color:#aaaacc;font-size:1em;"></p>
+  <button class="btn" onclick="continueNextLevel()">进入下一关</button>
 </div>
 
 <script>
@@ -204,6 +237,7 @@ const SUPER_PILL_LENGTH_TRIGGER = 30; // snake length to trigger super pill
 const SUPER_PILL_LIFETIME = 3000; // ms
 const SUPER_PILL_COOLDOWN_RANGE = [8000, 15000]; // random 8-15s between super pills
 const DIFFICULTY_UP_INTERVAL = 30000; // ms, every 30s difficulty increases
+const LEVEL_UP_SCORE = 1000; // score to advance to next level
 const DIRECTIONS = {
   UP: { x: 0, y: -1 },
   DOWN: { x: 0, y: 1 },
@@ -228,6 +262,8 @@ let superPillLastTime = 0; // timestamp of last super pill end
 let superPillNextCooldown = 0; // next random cooldown duration in ms
 let difficultyLevel = 1; // increases over time, affects missile count/speed and pill count
 let lastDifficultyUpTime = 0;
+let currentLevel = 1; // 关卡，超过1000分晋级
+let playerName = ''; // 玩家昵称
 let score = 0;
 let survivalTime = 0;
 let gameRunning = false;
@@ -248,6 +284,9 @@ function init() {
   window.addEventListener('resize', resizeCanvas);
   setupTouchControls();
   setupKeyboardControls();
+  // 恢复上次昵称
+  const savedName = localStorage.getItem('snakePlayerName');
+  if (savedName) document.getElementById('nicknameInput').value = savedName;
   renderLeaderboards();
 }
 
@@ -590,8 +629,15 @@ function setupKeyboardControls() {
 
 // ============ GAME START ============
 function startGame() {
+  // 读取昵称
+  const input = document.getElementById('nicknameInput');
+  playerName = (input.value || '').trim() || '玩家';
+  // 保存昵称到localStorage方便下次
+  localStorage.setItem('snakePlayerName', playerName);
+
   document.getElementById('startScreen').classList.add('hidden');
   document.getElementById('gameOverScreen').classList.add('hidden');
+  document.getElementById('levelUpScreen').classList.add('hidden');
   document.getElementById('hud').classList.remove('hidden');
   document.getElementById('pauseBtn').classList.remove('hidden');
 
@@ -616,6 +662,7 @@ function startGame() {
   superPillNextCooldown = 0;
   difficultyLevel = 1;
   lastDifficultyUpTime = 0;
+  currentLevel = 1;
   score = 0;
   survivalTime = 0;
   gameRunning = true;
@@ -662,16 +709,21 @@ function gameLoop(timestamp) {
     autoGrow();
   }
 
-  // Survival score
+  // Survival score (乘以关卡倍率)
   if (timestamp - lastSurvivalScoreTime >= SURVIVAL_SCORE_INTERVAL) {
     lastSurvivalScoreTime = timestamp;
-    score += 1;
+    const addScore = currentLevel; // 关卡1=1分, 关卡2=2分...
+    score += addScore;
     survivalTime += 1;
     // Score popup near head
     if (snake.length > 0) {
       const hx = snake[0].x * GRID_SIZE + GRID_SIZE / 2;
       const hy = snake[0].y * GRID_SIZE;
-      spawnScorePopup(hx, hy, '+1', '#ffcc00');
+      spawnScorePopup(hx, hy, `+${addScore}`, '#ffcc00');
+    }
+    // 检查是否晋级
+    if (score >= LEVEL_UP_SCORE * currentLevel) {
+      triggerLevelUp();
     }
   }
 
@@ -758,7 +810,8 @@ function moveSnake() {
   for (let i = pills.length - 1; i >= 0; i--) {
     if (head.x === pills[i].x && head.y === pills[i].y) {
       atePill = true;
-      score += PILL_SCORE;
+      const pillScore = PILL_SCORE * currentLevel; // 关卡倍率
+      score += pillScore;
       const pillX = pills[i].x * GRID_SIZE + GRID_SIZE / 2;
       const pillY = pills[i].y * GRID_SIZE + GRID_SIZE / 2;
       pills.splice(i, 1);
@@ -766,7 +819,11 @@ function moveSnake() {
       spawnHealEffect(pillX, pillY);
       playHealSound();
       // Score popup
-      spawnScorePopup(pillX, pillY - 5, '+10', '#00ccff');
+      spawnScorePopup(pillX, pillY - 5, `+${pillScore}`, '#00ccff');
+      // 检查是否晋级
+      if (score >= LEVEL_UP_SCORE * currentLevel) {
+        triggerLevelUp();
+      }
       // Shrink snake
       const shrinkAmount = Math.min(PILL_SHRINK, snake.length - 1);
       if (shrinkAmount > 0) {
@@ -830,7 +887,23 @@ function spawnMissile() {
       break;
   }
 
-  missiles.push({ x, y, vx, vy, trail: [], airflowTimer: 0 });
+  // 关卡2+: 导弹可以抛物线或S型运动
+  let curveType = 'straight';
+  let curveAmp = 0;
+  let curveFreq = 0;
+  if (currentLevel >= 2) {
+    const r = Math.random();
+    if (r < 0.4) {
+      curveType = 'parabola'; // 抛物线
+      curveAmp = (Math.random() * 0.008 + 0.004) * (Math.random() > 0.5 ? 1 : -1);
+    } else if (r < 0.8) {
+      curveType = 'sine'; // S型
+      curveAmp = Math.random() * 2 + 1;
+      curveFreq = Math.random() * 0.03 + 0.02;
+    }
+  }
+
+  missiles.push({ x, y, vx, vy, trail: [], airflowTimer: 0, curveType, curveAmp, curveFreq, age: 0 });
 }
 
 function updateMissiles() {
@@ -838,8 +911,33 @@ function updateMissiles() {
     const m = missiles[i];
     m.trail.push({ x: m.x, y: m.y });
     if (m.trail.length > 14) m.trail.shift();
-    m.x += m.vx;
-    m.y += m.vy;
+
+    // 基础直线运动
+    let moveX = m.vx;
+    let moveY = m.vy;
+
+    // 曲线运动叠加
+    if (m.curveType === 'parabola') {
+      // 抛物线：垂直于运动方向偏移
+      const angle = Math.atan2(m.vy, m.vx);
+      const perpX = -Math.sin(angle);
+      const perpY = Math.cos(angle);
+      const offset = m.curveAmp * m.age;
+      moveX += perpX * offset;
+      moveY += perpY * offset;
+    } else if (m.curveType === 'sine') {
+      // S型：正弦波垂直于运动方向
+      const angle = Math.atan2(m.vy, m.vx);
+      const perpX = -Math.sin(angle);
+      const perpY = Math.cos(angle);
+      const sineVal = Math.sin(m.age * m.curveFreq) * m.curveAmp * m.curveFreq;
+      moveX += perpX * sineVal;
+      moveY += perpY * sineVal;
+    }
+
+    m.x += moveX;
+    m.y += moveY;
+    m.age++;
 
     // Spawn airflow particles
     m.airflowTimer++;
@@ -1456,6 +1554,40 @@ function updateHUD() {
   document.getElementById('hudLength').textContent = `长度: ${snake.length}`;
   document.getElementById('hudTime').textContent = `${survivalTime}s`;
   document.getElementById('hudDifficulty').textContent = `Lv${difficultyLevel}`;
+  document.getElementById('hudLevel').textContent = `第${currentLevel}关`;
+}
+
+// ============ LEVEL UP ============
+function triggerLevelUp() {
+  gamePaused = true; // 暂停游戏
+  currentLevel++;
+  const levelDescs = {
+    2: '导弹开始曲线运动！积分翻倍！',
+    3: '导弹更加疯狂！积分三倍！',
+    4: '地狱模式！积分四倍！',
+  };
+  document.getElementById('levelUpText').textContent = `第${currentLevel}关`;
+  document.getElementById('levelUpDesc').textContent = levelDescs[currentLevel] || `积分${currentLevel}倍！难度更大！`;
+  document.getElementById('levelUpScreen').classList.remove('hidden');
+}
+
+function continueNextLevel() {
+  document.getElementById('levelUpScreen').classList.add('hidden');
+  gamePaused = false;
+  // 重置计时器避免暂停后跳跃
+  lastMoveTime = performance.now();
+  lastAutoGrowTime = performance.now();
+  lastSurvivalScoreTime = performance.now();
+  // 关卡2+: 替换现有导弹为曲线导弹
+  if (currentLevel >= 2) {
+    const mRange = getMissileCountRange();
+    // 移除部分直线导弹，补充曲线导弹
+    const toReplace = Math.ceil(missiles.length * 0.5);
+    for (let i = 0; i < toReplace; i++) {
+      missiles.splice(randInt(0, missiles.length - 1), 1);
+      spawnMissile();
+    }
+  }
 }
 
 // ============ GAME OVER ============
@@ -1466,12 +1598,14 @@ function gameOver() {
 
   document.getElementById('hud').classList.add('hidden');
   document.getElementById('pauseBtn').classList.add('hidden');
+  document.getElementById('levelUpScreen').classList.add('hidden');
 
   // Save score
-  saveScore(score);
+  saveScore(score, currentLevel);
 
   document.getElementById('finalScore').textContent = score;
   document.getElementById('deathReason').textContent = deathReason;
+  document.getElementById('finalLevel').textContent = `最终关卡: 第${currentLevel}关`;
   document.getElementById('gameOverScreen').classList.remove('hidden');
 
   renderLeaderboards();
@@ -1502,11 +1636,11 @@ function getScores() {
   } catch { return []; }
 }
 
-function saveScore(score) {
+function saveScore(score, level) {
   const scores = getScores();
-  scores.push({ score, date: Date.now(), week: getWeekKey(new Date()) });
+  scores.push({ score, level: level || 1, name: playerName, date: Date.now(), week: getWeekKey(new Date()) });
   localStorage.setItem('snakeScores', JSON.stringify(scores));
-  saveWeeklyChampion(score);
+  saveWeeklyChampion(score, playerName);
 }
 
 function getCurrentWeekScores() {
@@ -1518,19 +1652,22 @@ function getAllTimeScores() {
   return getScores().sort((a, b) => b.score - a.score).slice(0, 10);
 }
 
-function saveWeeklyChampion(score) {
+function saveWeeklyChampion(score, name) {
   const champions = getWeeklyChampions();
   const currentWeek = getWeekKey(new Date());
   const existing = champions.find(c => c.week === currentWeek);
   if (existing) {
     if (score > existing.champion) {
       existing.runnerUp = existing.champion;
+      existing.runnerUpName = existing.championName;
       existing.champion = score;
+      existing.championName = name;
     } else if (score > existing.runnerUp) {
       existing.runnerUp = score;
+      existing.runnerUpName = name;
     }
   } else {
-    champions.push({ week: currentWeek, champion: score, runnerUp: 0 });
+    champions.push({ week: currentWeek, champion: score, championName: name, runnerUp: 0, runnerUpName: '' });
   }
   // Keep only last 12 weeks
   while (champions.length > 12) champions.shift();
@@ -1545,12 +1682,12 @@ function getWeeklyChampions() {
 
 function renderLeaderboardHTML(scores) {
   if (scores.length === 0) return '<p style="text-align:center;color:#555;font-size:0.8em;">暂无记录</p>';
-  let html = '<table><tr><th>#</th><th>得分</th><th>时间</th></tr>';
+  let html = '<table><tr><th>#</th><th>玩家</th><th>得分</th><th>关卡</th></tr>';
   scores.slice(0, 10).forEach((s, i) => {
     const rankClass = i < 3 ? `rank-${i + 1}` : '';
-    const date = new Date(s.date);
-    const timeStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
-    html += `<tr class="${rankClass}"><td>${i + 1}</td><td>${s.score}</td><td>${timeStr}</td></tr>`;
+    const name = s.name || '玩家';
+    const lvl = s.level || 1;
+    html += `<tr class="${rankClass}"><td>${i + 1}</td><td>${name}</td><td>${s.score}</td><td>${lvl}</td></tr>`;
   });
   html += '</table>';
   return html;
@@ -1561,7 +1698,9 @@ function renderWeeklyChampionsHTML() {
   if (champions.length === 0) return '';
   let html = '';
   champions.slice(-4).reverse().forEach(c => {
-    html += `<p>🏆 ${c.week}: 冠军 ${c.champion} | 亚军 ${c.runnerUp || '-'}</p>`;
+    const champName = c.championName || '玩家';
+    const runnerName = c.runnerUpName || '';
+    html += `<p>🏆 ${c.week}: ${champName} ${c.champion} | ${runnerName || '-'} ${c.runnerUp || '-'}</p>`;
   });
   return html;
 }
